@@ -7,6 +7,7 @@ interface Props {
 }
 
 const { title, active } = Astro.props;
+const year = new Date().getFullYear();
 ---
 
 <!doctype html>
@@ -36,6 +37,12 @@ const { title, active } = Astro.props;
       <main>
         <slot />
       </main>
+      <footer class="site-footer">
+        <p>
+          © {year} Hazel Saenz. Publicado bajo licencia
+          <a href="https://opensource.org/licenses/MIT" rel="noopener noreferrer" target="_blank">MIT</a>.
+        </p>
+      </footer>
     </div>
   </body>
 </html>
