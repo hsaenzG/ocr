@@ -1,0 +1,101 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="Documents" active="documents">
+  <h1>Documents</h1>
+  <p class="lede">Lista de imágenes con estado de procesamiento. Se refresca sola si hay jobs activos.</p>
+
+  <div class="filters" id="filters">
+    <button type="button" data-status="" class="active">All</button>
+    <button type="button" data-status="PROCESSING">Processing</button>
+    <button type="button" data-status="COMPLETED">Completed</button>
+    <button type="button" data-status="FAILED">Failed</button>
+  </div>
+
+  <div class="panel">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Archivo</th>
+          <th>Status</th>
+          <th>Creado</th>
+        </tr>
+      </thead>
+      <tbody id="docs-body">
+        <tr><td colspan="3" class="muted">Cargando…</td></tr>
+      </tbody>
+    </table>
+    <p class="error" id="docs-error" hidden></p>
+  </div>
+</BaseLayout>
+
+<script>
+  import { api, ApiClientError } from "../../lib/api";
+
+  let statusFilter = "";
+  let timer: number | undefined;
+
+  const body = document.getElementById("docs-body")!;
+  const errorEl = document.getElementById("docs-error")!;
+  const filters = document.getElementById("filters")!;
+
+  function badgeClass(status: string): string {
+    if (status === "COMPLETED") return "ok";
+    if (status === "FAILED") return "danger";
+    if (status === "PROCESSING" || status === "QUEUED" || status === "UPLOADED") return "warn";
+    return "";
+  }
+
+  async function load() {
+    try {
+      const result = await api.listDocuments({
+        status: statusFilter || undefined,
+        limit: 50,
+      });
+      errorEl.hidden = true;
+      if (result.items.length === 0) {
+        body.innerHTML = `<tr><td colspan="3" class="muted">Sin documentos. <a href="/upload">Sube el primero</a>.</td></tr>`;
+        return;
+      }
+      body.innerHTML = result.items
+        .map(
+          (item) => `<tr>
+            <td><a href="/documents/detail/?id=${encodeURIComponent(item.documentId)}">${item.filename}</a></td>
+            <td><span class="badge ${badgeClass(item.status)}">${item.status}</span></td>
+            <td class="muted">${new Date(item.createdAt).toLocaleString()}</td>
+          </tr>`,
+        )
+        .join("");
+
+      const inflight = result.items.some((item) =>
+        ["UPLOADED", "QUEUED", "PROCESSING"].includes(item.status),
+      );
+      window.clearInterval(timer);
+      if (inflight) {
+        timer = window.setInterval(load, 5000);
+      }
+    } catch (error) {
+      errorEl.hidden = false;
+      errorEl.textContent =
+        error instanceof ApiClientError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Error cargando documentos";
+      body.innerHTML = `<tr><td colspan="3" class="muted">No se pudo cargar la lista.</td></tr>`;
+    }
+  }
+
+  filters.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (target.tagName !== "BUTTON") return;
+    statusFilter = target.dataset.status ?? "";
+    for (const btn of filters.querySelectorAll("button")) {
+      btn.classList.toggle("active", btn === target);
+    }
+    void load();
+  });
+
+  void load();
+</script>

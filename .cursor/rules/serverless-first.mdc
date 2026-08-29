@@ -1,0 +1,26 @@
+---
+description: Prefer serverless-first AWS architectures (event-driven, managed services)
+alwaysApply: true
+---
+
+# Serverless-first architecture
+
+When designing or implementing systems in this project, **prefer serverless** over always-on compute.
+
+## Prefer
+
+- Lambda, API Gateway, S3, SQS/SNS/EventBridge, DynamoDB, Step Functions, CloudFront, Cognito, Textract/Bedrock as needed
+- Event-driven flows (S3 → SQS → Lambda) over synchronous heavy work in the request path
+- IaC with **AWS CDK (TypeScript)**
+- On-demand / pay-per-use; cost near zero at idle
+
+## Avoid unless explicitly required
+
+- ECS, EKS, EC2, long-running servers, always-on containers
+- Proxying large binary uploads through API Gateway (use S3 presigned URLs)
+
+## Design checks
+
+1. Can this run as a Lambda + managed trigger?
+2. Is heavy work async behind a queue?
+3. Is state in DynamoDB/S3, not on a disk that needs babysitting?

@@ -1,0 +1,22 @@
+{
+  "name": "@ocr/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.787.0",
+    "@aws-sdk/client-s3": "^3.787.0",
+    "@aws-sdk/lib-dynamodb": "^3.787.0",
+    "@aws-sdk/s3-request-presigner": "^3.787.0",
+    "@ocr/shared": "*"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.149",
+    "@types/node": "^22.14.0",
+    "typescript": "^5.8.2"
+  }
+}

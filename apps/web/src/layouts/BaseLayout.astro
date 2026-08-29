@@ -1,0 +1,41 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  active?: "upload" | "documents" | "dashboard";
+}
+
+const { title, active } = Astro.props;
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="OCR serverless — sube imágenes, extrae texto, consulta resultados" />
+    <title>{title} · OCR</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&family=Instrument+Serif:ital@0;1&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="top">
+        <a class="brand" href="/">OCR</a>
+        <nav class="nav" aria-label="Principal">
+          <a class:list={[{ active: active === "upload" }]} href="/upload">Upload</a>
+          <a class:list={[{ active: active === "documents" }]} href="/documents">Documents</a>
+          <a class:list={[{ active: active === "dashboard" }]} href="/dashboard">Dashboard</a>
+        </nav>
+      </header>
+      <main>
+        <slot />
+      </main>
+    </div>
+  </body>
+</html>

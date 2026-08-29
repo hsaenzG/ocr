@@ -1,0 +1,57 @@
+---
+description: camelCase naming, Clean Code, and SOLID for all application code
+alwaysApply: true
+---
+
+# Naming, Clean Code & SOLID
+
+## Naming — camelCase
+
+Use **camelCase** for variables, functions, methods, and object properties in application code (TypeScript/JavaScript).
+
+```typescript
+// ❌ BAD
+const document_id = id;
+function Process_Image(raw_data: Buffer) {}
+
+// ✅ GOOD
+const documentId = id;
+function processImage(rawData: Buffer) {}
+```
+
+- Types/classes: `PascalCase`
+- Files/folders: match repo convention; prefer `camelCase` or `kebab-case` consistently — **identifiers inside code stay camelCase**
+- Env vars / AWS resource names in CDK: follow AWS/CDK norms (`UPPER_SNAKE` for env keys is OK)
+
+## Clean Code
+
+- Small functions with one responsibility; names reveal intent
+- No dead code, no commented-out blocks, no speculative abstractions
+- Prefer early returns over deep nesting
+- Explicit errors; never empty `catch`
+- Keep modules cohesive; avoid god handlers — extract use-cases/services
+
+## SOLID (always)
+
+| Principle | Practice here |
+|-----------|----------------|
+| **S** | One reason to change per module (e.g. `presignUploads` ≠ `runOcr`) |
+| **O** | Extend via new handlers/strategies, not endless `if` chains on type/status |
+| **L** | Implementations must honor their port/interface contracts |
+| **I** | Narrow ports (`DocumentRepository`, `OcrEngine`) — no fat “AwsClient” bags |
+| **D** | Depend on ports; inject Textract/Dynamo/S3 adapters at the edges |
+
+```typescript
+// ❌ BAD — handler knows Textract + Dynamo + domain mixed
+export async function handler(event: SQSEvent) {
+  const textract = new TextractClient({});
+  // parse, OCR, map, persist all inline...
+}
+
+// ✅ GOOD — handler orchestrates; domain depends on ports
+export async function handler(event: SQSEvent) {
+  await processDocumentMessage(event, { ocr, documents, clock });
+}
+```
+
+Lambda entrypoints stay thin: parse event → call use case → map result/errors.

@@ -1,0 +1,79 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="Dashboard" active="dashboard">
+  <h1>Dashboard</h1>
+  <p class="lede">Totales del rango reciente (STATS#DAILY).</p>
+
+  <div class="stats" id="stats">
+    <div class="stat"><strong id="stat-uploaded">—</strong><span>Uploaded</span></div>
+    <div class="stat"><strong id="stat-completed">—</strong><span>Completed</span></div>
+    <div class="stat"><strong id="stat-failed">—</strong><span>Failed</span></div>
+    <div class="stat"><strong id="stat-processing">—</strong><span>Processing</span></div>
+  </div>
+
+  <div class="panel" style="margin-top: 1.25rem;">
+    <h2 style="font-family: var(--font-display); font-weight: 400; margin-top: 0;">Últimos días</h2>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Uploaded</th>
+          <th>Completed</th>
+          <th>Failed</th>
+        </tr>
+      </thead>
+      <tbody id="series-body">
+        <tr><td colspan="4" class="muted">Cargando…</td></tr>
+      </tbody>
+    </table>
+    <p class="error" id="dash-error" hidden></p>
+  </div>
+</BaseLayout>
+
+<script>
+  import { api, ApiClientError } from "../lib/api";
+
+  const uploaded = document.getElementById("stat-uploaded")!;
+  const completed = document.getElementById("stat-completed")!;
+  const failed = document.getElementById("stat-failed")!;
+  const processing = document.getElementById("stat-processing")!;
+  const seriesBody = document.getElementById("series-body")!;
+  const errorEl = document.getElementById("dash-error")!;
+
+  void (async () => {
+    try {
+      const summary = await api.statsSummary();
+      uploaded.textContent = String(summary.totals.uploaded);
+      completed.textContent = String(summary.totals.completed);
+      failed.textContent = String(summary.totals.failed);
+      processing.textContent = String(summary.totals.processing);
+
+      if (summary.series.length === 0) {
+        seriesBody.innerHTML = `<tr><td colspan="4" class="muted">Sin stats todavía.</td></tr>`;
+        return;
+      }
+
+      seriesBody.innerHTML = [...summary.series]
+        .reverse()
+        .map(
+          (day) => `<tr>
+            <td>${day.date}</td>
+            <td>${day.uploaded}</td>
+            <td>${day.completed}</td>
+            <td>${day.failed}</td>
+          </tr>`,
+        )
+        .join("");
+    } catch (error) {
+      errorEl.hidden = false;
+      errorEl.textContent =
+        error instanceof ApiClientError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Error cargando dashboard";
+    }
+  })();
+</script>

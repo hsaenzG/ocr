@@ -1,0 +1,33 @@
+---
+description: TypeScript end-to-end and Astro static frontend for this project
+alwaysApply: true
+---
+
+# TypeScript + Astro
+
+## Language
+
+Use **TypeScript** for CDK, Lambda API, Lambda Processor, shared packages, and the frontend. Do not introduce Python/Java Lambdas or a React+Vite app unless the user explicitly overrides.
+
+- Lambda runtime: **Node.js 24**
+- Prefer strict TypeScript (`strict: true`)
+
+## Frontend
+
+- Framework: **Astro** with `output: 'static'`
+- Interactive pieces (bulk upload, polling): TypeScript **client islands**
+- Host build output on S3 + CloudFront
+- Dev default port: `4321`; API base via `PUBLIC_API_BASE_URL`
+
+```txt
+apps/web/     # Astro + TypeScript
+apps/api/     # Lambda API TypeScript
+apps/processor/  # Lambda worker TypeScript
+infra/        # AWS CDK TypeScript
+```
+
+## Avoid
+
+- React/Vite/Next as the primary FE stack
+- Astro SSR adapters for MVP (static only)
+- Mixing untyped JavaScript in new modules

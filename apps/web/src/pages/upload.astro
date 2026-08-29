@@ -1,0 +1,200 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="Upload" active="upload">
+  <h1>Upload</h1>
+  <p class="lede">
+    JPEG o PNG (Textract no soporta WebP). La API firma URLs; el browser sube directo a S3 y el OCR corre en background.
+  </p>
+
+  <div class="panel" id="upload-root" data-api-ready="false">
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Seleccionar imágenes">
+      <strong>Arrastra imágenes aquí</strong>
+      <div>o haz click para elegir archivos</div>
+      <input id="file-input" type="file" accept="image/jpeg,image/png" multiple hidden />
+    </div>
+
+    <ul class="file-list" id="file-list"></ul>
+
+    <div class="row" style="margin-top: 1rem;">
+      <button class="btn" id="upload-btn" type="button" disabled>Subir todos</button>
+      <button class="btn btn-ghost" id="clear-btn" type="button">Limpiar</button>
+    </div>
+    <p class="success-msg" id="upload-success" hidden></p>
+    <p class="error" id="upload-error" hidden></p>
+    <p class="muted" id="upload-hint"></p>
+  </div>
+</BaseLayout>
+
+<script>
+  import { api, getApiBaseUrl, ApiClientError } from "../lib/api";
+
+  type QueueItem = {
+    file: File;
+    status: "pending" | "uploading" | "done" | "error";
+    message?: string;
+    documentId?: string;
+  };
+
+  const allowed = new Set(["image/jpeg", "image/png"]);
+  const queue: QueueItem[] = [];
+  const maxConcurrent = 4;
+
+  const dropzone = document.getElementById("dropzone")!;
+  const fileInput = document.getElementById("file-input") as HTMLInputElement;
+  const fileList = document.getElementById("file-list")!;
+  const uploadBtn = document.getElementById("upload-btn") as HTMLButtonElement;
+  const clearBtn = document.getElementById("clear-btn") as HTMLButtonElement;
+  const errorEl = document.getElementById("upload-error")!;
+  const successEl = document.getElementById("upload-success")!;
+  const hintEl = document.getElementById("upload-hint")!;
+
+  if (!getApiBaseUrl()) {
+    hintEl.textContent =
+      "Define PUBLIC_API_BASE_URL (output ApiUrl de cdk deploy) y reinicia astro dev.";
+  } else {
+    hintEl.textContent = `API: ${getApiBaseUrl()}`;
+  }
+
+  function render() {
+    fileList.innerHTML = queue
+      .map((item) => {
+        const badgeClass =
+          item.status === "done"
+            ? "ok"
+            : item.status === "error"
+              ? "danger"
+              : item.status === "uploading"
+                ? "warn"
+                : "";
+        const label =
+          item.status === "done"
+            ? "subida"
+            : item.status === "uploading"
+              ? "subiendo"
+              : item.status === "error"
+                ? "error"
+                : "pendiente";
+        return `<li><span>${item.file.name} · ${(item.file.size / 1024).toFixed(1)} KB</span><span class="badge ${badgeClass}">${label}${item.message ? ` — ${item.message}` : ""}</span></li>`;
+      })
+      .join("");
+    uploadBtn.disabled = queue.length === 0 || !getApiBaseUrl();
+  }
+
+  function addFiles(files: FileList | File[]) {
+    errorEl.hidden = true;
+    successEl.hidden = true;
+    for (const file of Array.from(files)) {
+      if (!allowed.has(file.type)) {
+        errorEl.hidden = false;
+        errorEl.textContent = `Archivo rechazado (solo JPEG/PNG; Textract no soporta WebP): ${file.name}`;
+        continue;
+      }
+      queue.push({ file, status: "pending" });
+    }
+    render();
+  }
+
+  dropzone.addEventListener("click", () => fileInput.click());
+  dropzone.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      fileInput.click();
+    }
+  });
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files) addFiles(fileInput.files);
+    fileInput.value = "";
+  });
+  dropzone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    dropzone.classList.add("dragover");
+  });
+  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+  dropzone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropzone.classList.remove("dragover");
+    if (event.dataTransfer?.files) addFiles(event.dataTransfer.files);
+  });
+
+  clearBtn.addEventListener("click", () => {
+    queue.splice(0, queue.length);
+    successEl.hidden = true;
+    errorEl.hidden = true;
+    render();
+  });
+
+  uploadBtn.addEventListener("click", async () => {
+    errorEl.hidden = true;
+    successEl.hidden = true;
+    uploadBtn.disabled = true;
+    const pending = queue.filter((item) => item.status === "pending" || item.status === "error");
+    try {
+      const { uploads } = await api.presign(
+        pending.map((item) => ({
+          filename: item.file.name,
+          contentType: item.file.type,
+          sizeBytes: item.file.size,
+        })),
+      );
+
+      let index = 0;
+      async function worker() {
+        while (index < pending.length) {
+          const current = index++;
+          const item = pending[current];
+          const signed = uploads[current];
+          item.status = "uploading";
+          item.documentId = signed.documentId;
+          render();
+          try {
+            const put = await fetch(signed.uploadUrl, {
+              method: "PUT",
+              headers: signed.headers,
+              body: item.file,
+            });
+            if (!put.ok) {
+              throw new Error(`S3 PUT ${put.status}`);
+            }
+            item.status = "done";
+            item.message = "en cola para OCR";
+          } catch (error) {
+            item.status = "error";
+            item.message = error instanceof Error ? error.message : "upload failed";
+          }
+          render();
+        }
+      }
+
+      await Promise.all(
+        Array.from({ length: Math.min(maxConcurrent, pending.length) }, () => worker()),
+      );
+
+      const doneCount = pending.filter((item) => item.status === "done").length;
+      const failCount = pending.filter((item) => item.status === "error").length;
+      if (doneCount > 0) {
+        successEl.hidden = false;
+        successEl.innerHTML =
+          doneCount === 1
+            ? `Imagen subida correctamente. El OCR se ejecuta en background — <a href="/documents">ver documentos</a>.`
+            : `${doneCount} imágenes subidas correctamente. El OCR se ejecuta en background — <a href="/documents">ver documentos</a>.`;
+        if (failCount > 0) {
+          successEl.innerHTML += ` (${failCount} fallaron)`;
+        }
+      }
+    } catch (error) {
+      errorEl.hidden = false;
+      errorEl.textContent =
+        error instanceof ApiClientError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Upload failed";
+    } finally {
+      render();
+    }
+  });
+
+  render();
+</script>

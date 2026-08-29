@@ -1,0 +1,76 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="Document" active="documents">
+  <h1>Documento</h1>
+  <p class="lede" id="doc-title">Cargando detalle…</p>
+
+  <div class="detail-grid">
+    <div class="panel">
+      <img class="preview" id="preview" alt="Preview del documento" hidden />
+      <p class="muted" id="preview-fallback">Sin preview todavía.</p>
+    </div>
+    <div class="panel">
+      <div class="row" style="margin-bottom: 1rem;">
+        <span class="badge" id="status-badge">—</span>
+        <span class="muted" id="meta-line"></span>
+      </div>
+      <h2 style="font-family: var(--font-display); font-weight: 400; margin-top: 0;">Texto extraído</h2>
+      <pre class="plain" id="plain-text">—</pre>
+      <p class="error" id="detail-error" hidden></p>
+    </div>
+  </div>
+</BaseLayout>
+
+<script>
+  import { api, ApiClientError } from "../../lib/api";
+
+  const params = new URLSearchParams(window.location.search);
+  const documentId = params.get("id");
+
+  const title = document.getElementById("doc-title")!;
+  const preview = document.getElementById("preview") as HTMLImageElement;
+  const previewFallback = document.getElementById("preview-fallback")!;
+  const statusBadge = document.getElementById("status-badge")!;
+  const metaLine = document.getElementById("meta-line")!;
+  const plainText = document.getElementById("plain-text")!;
+  const errorEl = document.getElementById("detail-error")!;
+
+  if (!documentId) {
+    title.textContent = "Falta el parámetro id";
+  } else {
+    void (async () => {
+      try {
+        const detail = await api.getDocument(documentId);
+        title.textContent = detail.meta.filename;
+        statusBadge.textContent = detail.meta.status;
+        statusBadge.className = `badge ${
+          detail.meta.status === "COMPLETED"
+            ? "ok"
+            : detail.meta.status === "FAILED"
+              ? "danger"
+              : "warn"
+        }`;
+        metaLine.textContent = `${detail.meta.contentType} · ${(detail.meta.sizeBytes / 1024).toFixed(1)} KB · ${new Date(detail.meta.createdAt).toLocaleString()}`;
+        plainText.textContent =
+          detail.extract?.plainText ||
+          detail.meta.errorMessage ||
+          "Sin extract todavía.";
+
+        const previewResult = await api.previewUrl(documentId);
+        preview.src = previewResult.url;
+        preview.hidden = false;
+        previewFallback.hidden = true;
+      } catch (error) {
+        errorEl.hidden = false;
+        errorEl.textContent =
+          error instanceof ApiClientError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : "Error cargando detalle";
+      }
+    })();
+  }
+</script>

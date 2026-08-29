@@ -1,0 +1,24 @@
+{
+  "name": "ocr",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Serverless OCR pipeline — S3 → SQS → Lambda → Textract → DynamoDB + Astro UI",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "infra"
+  ],
+  "scripts": {
+    "build": "npm run build -w @ocr/shared && npm run build -w @ocr/api && npm run build -w @ocr/processor && npm run build -w @ocr/web",
+    "build:infra": "npm run build -w @ocr/infra",
+    "synth": "npm run synth -w @ocr/infra",
+    "deploy": "npm run deploy -w @ocr/infra",
+    "deploy:web": "bash scripts/deploy-amplify.sh",
+    "destroy": "npm run destroy -w @ocr/infra",
+    "dev:web": "npm run dev -w @ocr/web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

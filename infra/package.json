@@ -1,0 +1,25 @@
+{
+  "name": "@ocr/infra",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -w -p tsconfig.json",
+    "synth": "cdk synth",
+    "deploy": "cdk deploy --require-approval never",
+    "destroy": "cdk destroy --force",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-cdk/aws-amplify-alpha": "^2.267.0-alpha.0",
+    "aws-cdk-lib": "^2.190.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "aws-cdk": "^2.1007.0",
+    "esbuild": "^0.25.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  }
+}
