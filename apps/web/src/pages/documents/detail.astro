@@ -9,6 +9,7 @@ import BaseLayout from "../../layouts/BaseLayout.astro";
   <div class="detail-grid">
     <div class="panel">
       <img class="preview" id="preview" alt="Preview del documento" hidden />
+      <iframe class="preview" id="preview-pdf" title="Preview del PDF" hidden></iframe>
       <p class="muted" id="preview-fallback">Sin preview todavía.</p>
     </div>
     <div class="panel">
@@ -18,6 +19,23 @@ import BaseLayout from "../../layouts/BaseLayout.astro";
       </div>
       <h2 style="font-family: var(--font-display); font-weight: 400; margin-top: 0;">Texto extraído</h2>
       <pre class="plain" id="plain-text">—</pre>
+      <div class="row analytics-toolbar">
+        <h2 style="font-family: var(--font-display); font-weight: 400; margin: 0;">Datos tabulados</h2>
+        <div class="row" id="analytics-actions" hidden>
+          <button class="btn btn-ghost" id="edit-fields-btn" type="button">Corregir campos</button>
+          <button class="btn" id="save-fields-btn" type="button" hidden>Guardar</button>
+          <button class="btn btn-ghost" id="cancel-fields-btn" type="button" hidden>Cancelar</button>
+        </div>
+      </div>
+      <p class="muted" id="analytics-kind"></p>
+      <table class="analytics-table" id="analytics-table" hidden>
+        <thead>
+          <tr><th>Campo</th><th>Valor</th></tr>
+        </thead>
+        <tbody id="analytics-body"></tbody>
+      </table>
+      <p class="muted" id="analytics-empty">Sin tabla analytics todavía (el stream la crea al insertar EXTRACT).</p>
+      <p class="muted" id="save-status" hidden></p>
       <p class="error" id="detail-error" hidden></p>
     </div>
   </div>
@@ -26,20 +44,160 @@ import BaseLayout from "../../layouts/BaseLayout.astro";
 <script>
   import { api, ApiClientError } from "../../lib/api";
 
+  type AnalyticsField = {
+    key: string;
+    label: string;
+    value: string;
+    source?: string;
+  };
+
   const params = new URLSearchParams(window.location.search);
   const documentId = params.get("id");
 
   const title = document.getElementById("doc-title")!;
   const preview = document.getElementById("preview") as HTMLImageElement;
+  const previewPdf = document.getElementById("preview-pdf") as HTMLIFrameElement;
   const previewFallback = document.getElementById("preview-fallback")!;
   const statusBadge = document.getElementById("status-badge")!;
   const metaLine = document.getElementById("meta-line")!;
   const plainText = document.getElementById("plain-text")!;
+  const analyticsKind = document.getElementById("analytics-kind")!;
+  const analyticsTable = document.getElementById("analytics-table")!;
+  const analyticsBody = document.getElementById("analytics-body")!;
+  const analyticsEmpty = document.getElementById("analytics-empty")!;
+  const analyticsActions = document.getElementById("analytics-actions")!;
+  const editBtn = document.getElementById("edit-fields-btn") as HTMLButtonElement;
+  const saveBtn = document.getElementById("save-fields-btn") as HTMLButtonElement;
+  const cancelBtn = document.getElementById("cancel-fields-btn") as HTMLButtonElement;
+  const saveStatus = document.getElementById("save-status")!;
   const errorEl = document.getElementById("detail-error")!;
+
+  let currentFields: AnalyticsField[] = [];
+  let editing = false;
+  let kindMeta = "";
+
+  function escapeHtml(value: string): string {
+    return value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+
+  function setEditing(next: boolean) {
+    editing = next;
+    editBtn.hidden = next;
+    saveBtn.hidden = !next;
+    cancelBtn.hidden = !next;
+    renderFields();
+  }
+
+  function renderFields() {
+    if (currentFields.length === 0) {
+      analyticsEmpty.hidden = false;
+      analyticsTable.hidden = true;
+      analyticsActions.hidden = true;
+      return;
+    }
+
+    analyticsEmpty.hidden = true;
+    analyticsTable.hidden = false;
+    analyticsActions.hidden = false;
+    analyticsKind.textContent = kindMeta;
+
+    if (editing) {
+      analyticsBody.innerHTML = currentFields
+        .map(
+          (field, index) => `<tr>
+            <th>${escapeHtml(field.label)}</th>
+            <td>
+              <input
+                class="field-edit-input"
+                data-index="${index}"
+                type="text"
+                value="${escapeHtml(field.value)}"
+                aria-label="${escapeHtml(field.label)}"
+              />
+            </td>
+          </tr>`,
+        )
+        .join("");
+      return;
+    }
+
+    analyticsBody.innerHTML = currentFields
+      .map(
+        (field) =>
+          `<tr><th>${escapeHtml(field.label)}</th><td>${escapeHtml(field.value)}${
+            field.source === "manual"
+              ? ' <span class="badge ok field-corrected">corregido</span>'
+              : ""
+          }</td></tr>`,
+      )
+      .join("");
+  }
+
+  function readEditedFields(): AnalyticsField[] {
+    return currentFields.map((field, index) => {
+      const input = analyticsBody.querySelector(
+        `input[data-index="${index}"]`,
+      ) as HTMLInputElement | null;
+      return {
+        ...field,
+        value: input?.value ?? field.value,
+      };
+    });
+  }
 
   if (!documentId) {
     title.textContent = "Falta el parámetro id";
   } else {
+    editBtn.addEventListener("click", () => {
+      saveStatus.hidden = true;
+      errorEl.hidden = true;
+      setEditing(true);
+    });
+
+    cancelBtn.addEventListener("click", () => {
+      saveStatus.hidden = true;
+      errorEl.hidden = true;
+      setEditing(false);
+    });
+
+    saveBtn.addEventListener("click", () => {
+      void (async () => {
+        errorEl.hidden = true;
+        saveStatus.hidden = false;
+        saveStatus.textContent = "Guardando correcciones…";
+        saveBtn.disabled = true;
+        try {
+          const payload = readEditedFields().map((field) => ({
+            key: field.key,
+            label: field.label,
+            value: field.value,
+          }));
+          const result = await api.updateAnalyticsFields(documentId, payload);
+          currentFields = result.analytics.fields;
+          kindMeta = `${result.analytics.documentKind} · ${result.analytics.metrics.fieldCount} campos · corregido manualmente${
+            result.analytics.parser ? ` · parser ${result.analytics.parser}` : ""
+          }`;
+          setEditing(false);
+          saveStatus.textContent = "Campos actualizados. El dashboard usará estos valores.";
+        } catch (error) {
+          errorEl.hidden = false;
+          errorEl.textContent =
+            error instanceof ApiClientError
+              ? error.message
+              : error instanceof Error
+                ? error.message
+                : "Error guardando campos";
+          saveStatus.hidden = true;
+        } finally {
+          saveBtn.disabled = false;
+        }
+      })();
+    });
+
     void (async () => {
       try {
         const detail = await api.getDocument(documentId);
@@ -58,9 +216,31 @@ import BaseLayout from "../../layouts/BaseLayout.astro";
           detail.meta.errorMessage ||
           "Sin extract todavía.";
 
+        const analytics = detail.analytics;
+        if (analytics?.fields?.length) {
+          currentFields = analytics.fields;
+        } else if (analytics?.tableRows?.length) {
+          currentFields = analytics.tableRows.map((row, index) => ({
+            key: `field_${index}`,
+            label: row.key,
+            value: row.value,
+          }));
+        }
+
+        if (analytics) {
+          const parserLabel = analytics.parser ? ` · parser ${analytics.parser}` : "";
+          kindMeta = `${analytics.documentKind} · ${analytics.metrics.lineCount} líneas · ${analytics.metrics.wordCount} palabras · ${analytics.metrics.avgConfidence}% confianza${parserLabel}`;
+        }
+        renderFields();
+
         const previewResult = await api.previewUrl(documentId);
-        preview.src = previewResult.url;
-        preview.hidden = false;
+        if (detail.meta.contentType === "application/pdf") {
+          previewPdf.src = previewResult.url;
+          previewPdf.hidden = false;
+        } else {
+          preview.src = previewResult.url;
+          preview.hidden = false;
+        }
         previewFallback.hidden = true;
       } catch (error) {
         errorEl.hidden = false;

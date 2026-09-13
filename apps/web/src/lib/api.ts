@@ -1,3 +1,5 @@
+import { clearAuthSession, getAuthToken } from "./auth";
+
 const apiBaseUrl = (import.meta.env.PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 
 export class ApiClientError extends Error {
@@ -11,7 +13,11 @@ export class ApiClientError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  options?: { auth?: boolean },
+): Promise<T> {
   if (!apiBaseUrl) {
     throw new ApiClientError(
       0,
@@ -20,12 +26,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+
+  if (options?.auth !== false) {
+    const token = getAuthToken();
+    if (token) {
+      headers.authorization = `Bearer ${token}`;
+    }
+  }
+
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
 
   if (!response.ok) {
@@ -41,6 +56,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // ignore
     }
+
+    if (response.status === 401 && options?.auth !== false) {
+      clearAuthSession();
+      if (!window.location.pathname.startsWith("/login")) {
+        const next = `${window.location.pathname}${window.location.search}`;
+        window.location.href = `/login/?next=${encodeURIComponent(next)}`;
+      }
+    }
+
     throw new ApiClientError(response.status, code, message);
   }
 
@@ -48,7 +72,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<{ ok: boolean }>("/health"),
+  health: () => request<{ ok: boolean }>("/health", undefined, { auth: false }),
+  login: (username: string, password: string) =>
+    request<{
+      username: string;
+      token: string;
+      expiresAt: string;
+    }>(
+      "/auth/login",
+      {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      },
+      { auth: false },
+    ),
+  me: () => request<{ username: string }>("/auth/me"),
   presign: (files: Array<{ filename: string; contentType: string; sizeBytes: number }>) =>
     request<{
       uploads: Array<{
@@ -98,6 +136,23 @@ export const api = {
         engine: string;
         mode: string;
       };
+      analytics?: {
+        documentKind: string;
+        parser?: string;
+        fields?: Array<{
+          key: string;
+          label: string;
+          value: string;
+          source?: string;
+        }>;
+        tableRows: Array<{ key: string; value: string }>;
+        metrics: {
+          lineCount: number;
+          wordCount: number;
+          avgConfidence: number;
+          fieldCount: number;
+        };
+      };
       jobs?: Array<{
         jobId: string;
         status: string;
@@ -105,6 +160,32 @@ export const api = {
         errorMessage?: string | null;
       }>;
     }>(`/documents/${documentId}`),
+  updateAnalyticsFields: (
+    documentId: string,
+    fields: Array<{ key: string; value: string; label?: string }>,
+  ) =>
+    request<{
+      analytics: {
+        documentKind: string;
+        parser?: string;
+        fields: Array<{
+          key: string;
+          label: string;
+          value: string;
+          source?: string;
+        }>;
+        tableRows: Array<{ key: string; value: string }>;
+        metrics: {
+          lineCount: number;
+          wordCount: number;
+          avgConfidence: number;
+          fieldCount: number;
+        };
+      };
+    }>(`/documents/${documentId}/analytics/fields`, {
+      method: "PUT",
+      body: JSON.stringify({ fields }),
+    }),
   previewUrl: (documentId: string) =>
     request<{ url: string; expiresIn: number }>(
       `/documents/${documentId}/preview-url`,
@@ -129,6 +210,66 @@ export const api = {
         processing: number;
       }>;
     }>(`/stats/summary${suffix}`);
+  },
+  analyticsSummary: (from?: string, to?: string) => {
+    const query = new URLSearchParams();
+    if (from) query.set("from", from);
+    if (to) query.set("to", to);
+    const suffix = query.toString() ? `?${query}` : "";
+    return request<{
+      totals: {
+        documentsAnalyzed: number;
+        avgConfidence: number;
+        totalLines: number;
+        totalWords: number;
+      };
+      series: Array<{
+        date: string;
+        documentsAnalyzed: number;
+        avgConfidence: number;
+        totalLines: number;
+        totalWords: number;
+        byContentType: Record<string, number>;
+        byKind: Record<string, number>;
+      }>;
+      fields: Array<{
+        key: string;
+        label: string;
+        values: Array<{ value: string; count: number }>;
+      }>;
+      kinds: Array<{ kind: string; count: number }>;
+    }>(`/analytics/summary${suffix}`);
+  },
+  analyticsDocuments: (filters: Record<string, string> = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value) query.set(key, value);
+    }
+    const suffix = query.toString() ? `?${query}` : "";
+    return request<{
+      total: number;
+      filters: Record<string, string>;
+      items: Array<{
+        documentId: string;
+        filename: string;
+        contentType: string;
+        documentKind: string;
+        status: string;
+        createdAt: string;
+        fields: Record<string, string>;
+        metrics: {
+          lineCount: number;
+          wordCount: number;
+          avgConfidence: number;
+          fieldCount: number;
+        };
+      }>;
+      fieldBreakdown: Array<{
+        key: string;
+        label: string;
+        values: Array<{ value: string; count: number }>;
+      }>;
+    }>(`/analytics/documents${suffix}`);
   },
 };
 

@@ -11,6 +11,10 @@ import {
   createPresignUploadsUseCase,
   HttpError,
 } from "../useCases/presignUploads.js";
+import { createUpdateAnalyticsFieldsUseCase } from "../useCases/updateAnalyticsFields.js";
+import { AuthError, createAuthService } from "../auth/tokens.js";
+
+const PUBLIC_PATHS = new Set(["/health", "/auth/login"]);
 
 export function createApiRouter(deps: {
   documents: DocumentRepository;
@@ -19,9 +23,12 @@ export function createApiRouter(deps: {
   ids: IdGenerator;
   uploadPrefix: string;
   maxUploadBytes: number;
+  maxPdfUploadBytes: number;
   docsBucketName: string;
+  auth: ReturnType<typeof createAuthService>;
 }) {
   const presignUploads = createPresignUploadsUseCase(deps);
+  const updateAnalyticsFields = createUpdateAnalyticsFieldsUseCase(deps);
 
   return {
     async handle(event: APIGatewayProxyEventV2) {
@@ -35,6 +42,34 @@ export function createApiRouter(deps: {
       try {
         if (method === "GET" && path === "/health") {
           return jsonResponse(200, { ok: true, service: "ocr-api" });
+        }
+
+        if (method === "POST" && path === "/auth/login") {
+          const body = parseJsonBody(event.body);
+          const username = String(body.username ?? "");
+          const password = String(body.password ?? "");
+          if (!username || !password) {
+            throw new HttpError(
+              400,
+              "INVALID_BODY",
+              "username and password are required",
+            );
+          }
+          const session = await deps.auth.login(username, password);
+          return jsonResponse(200, session);
+        }
+
+        if (!PUBLIC_PATHS.has(path)) {
+          await deps.auth.requireUser(
+            event.headers?.authorization ?? event.headers?.Authorization,
+          );
+        }
+
+        if (method === "GET" && path === "/auth/me") {
+          const user = await deps.auth.requireUser(
+            event.headers?.authorization ?? event.headers?.Authorization,
+          );
+          return jsonResponse(200, { username: user.username });
         }
 
         if (method === "POST" && path === "/uploads/presign") {
@@ -83,6 +118,27 @@ export function createApiRouter(deps: {
           return jsonResponse(200, { url, expiresIn });
         }
 
+        const analyticsFieldsMatch = path.match(
+          /^\/documents\/([^/]+)\/analytics\/fields$/,
+        );
+        if (method === "PUT" && analyticsFieldsMatch) {
+          const documentId = decodeURIComponent(analyticsFieldsMatch[1]);
+          const body = parseJsonBody(event.body);
+          const fields = Array.isArray(body.fields) ? body.fields : [];
+          const updated = await updateAnalyticsFields.execute({
+            documentId,
+            fields: fields.map((field: unknown) => {
+              const record = (field ?? {}) as Record<string, unknown>;
+              return {
+                key: String(record.key ?? ""),
+                value: String(record.value ?? ""),
+                label: record.label ? String(record.label) : undefined,
+              };
+            }),
+          });
+          return jsonResponse(200, { analytics: updated });
+        }
+
         if (method === "GET" && path === "/stats/summary") {
           const toDate =
             event.queryStringParameters?.to ?? deps.clock.nowIso().slice(0, 10);
@@ -92,8 +148,46 @@ export function createApiRouter(deps: {
           return jsonResponse(200, summary);
         }
 
+        if (method === "GET" && path === "/analytics/summary") {
+          const toDate =
+            event.queryStringParameters?.to ?? deps.clock.nowIso().slice(0, 10);
+          const fromDate =
+            event.queryStringParameters?.from ?? shiftDays(toDate, -29);
+          const summary = await deps.documents.getAnalyticsSummary(
+            fromDate,
+            toDate,
+          );
+          return jsonResponse(200, summary);
+        }
+
+        if (method === "GET" && path === "/analytics/documents") {
+          const params = event.queryStringParameters ?? {};
+          const filters: Record<string, string> = {};
+          for (const [key, value] of Object.entries(params)) {
+            if (
+              value &&
+              key !== "from" &&
+              key !== "to" &&
+              key !== "limit" &&
+              key !== "cursor"
+            ) {
+              filters[key] = value;
+            }
+          }
+          const result = await deps.documents.queryAnalyticsDocuments(filters);
+          return jsonResponse(200, result);
+        }
+
         return errorResponse(404, "NotFound", `No route for ${method} ${path}`, "NOT_FOUND");
       } catch (error) {
+        if (error instanceof AuthError) {
+          return errorResponse(
+            error.statusCode,
+            "AuthError",
+            error.message,
+            error.code,
+          );
+        }
         if (error instanceof HttpError) {
           return errorResponse(
             error.statusCode,

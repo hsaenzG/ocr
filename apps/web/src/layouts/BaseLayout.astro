@@ -4,9 +4,10 @@ import "../styles/global.css";
 interface Props {
   title: string;
   active?: "upload" | "documents" | "dashboard";
+  publicPage?: boolean;
 }
 
-const { title, active } = Astro.props;
+const { title, active, publicPage = false } = Astro.props;
 const year = new Date().getFullYear();
 ---
 
@@ -15,7 +16,7 @@ const year = new Date().getFullYear();
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="OCR serverless — sube imágenes, extrae texto, consulta resultados" />
+    <meta name="description" content="OCR serverless — sube imágenes y PDFs, extrae texto, consulta resultados" />
     <title>{title} · OCR</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -24,7 +25,7 @@ const year = new Date().getFullYear();
       rel="stylesheet"
     />
   </head>
-  <body>
+  <body data-public-page={publicPage ? "true" : "false"}>
     <div class="shell">
       <header class="top">
         <a class="brand" href="/">OCR</a>
@@ -32,6 +33,7 @@ const year = new Date().getFullYear();
           <a class:list={[{ active: active === "upload" }]} href="/upload">Upload</a>
           <a class:list={[{ active: active === "documents" }]} href="/documents">Documents</a>
           <a class:list={[{ active: active === "dashboard" }]} href="/dashboard">Dashboard</a>
+          <button class="btn btn-ghost nav-logout" id="logout-btn" type="button" hidden>Salir</button>
         </nav>
       </header>
       <main>
@@ -49,5 +51,32 @@ const year = new Date().getFullYear();
         </p>
       </footer>
     </div>
+    <script>
+      import {
+        clearAuthSession,
+        getAuthUsername,
+        isAuthenticated,
+        requireAuthOrRedirect,
+      } from "../lib/auth";
+
+      const isPublic = document.body.dataset.publicPage === "true";
+      const logoutBtn = document.getElementById("logout-btn") as HTMLButtonElement | null;
+
+      if (!isPublic) {
+        requireAuthOrRedirect();
+      }
+
+      if (logoutBtn && isAuthenticated()) {
+        logoutBtn.hidden = false;
+        const username = getAuthUsername();
+        if (username) {
+          logoutBtn.textContent = `Salir (${username})`;
+        }
+        logoutBtn.addEventListener("click", () => {
+          clearAuthSession();
+          window.location.href = "/login/";
+        });
+      }
+    </script>
   </body>
 </html>

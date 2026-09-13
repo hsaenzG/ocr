@@ -1,0 +1,63 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="Login" publicPage={true}>
+  <h1>Entrar</h1>
+  <p class="lede">Acceso de un solo usuario para el panel OCR.</p>
+
+  <form class="panel login-form" id="login-form">
+    <label>
+      Usuario
+      <input id="username" name="username" type="text" autocomplete="username" required />
+    </label>
+    <label>
+      Contraseña
+      <input id="password" name="password" type="password" autocomplete="current-password" required />
+    </label>
+    <button class="btn" type="submit">Iniciar sesión</button>
+    <p class="error" id="login-error" hidden></p>
+    <p class="muted" id="login-hint"></p>
+  </form>
+</BaseLayout>
+
+<script>
+  import { api, getApiBaseUrl, ApiClientError } from "../lib/api";
+  import { isAuthenticated, setAuthSession } from "../lib/auth";
+
+  const form = document.getElementById("login-form") as HTMLFormElement;
+  const usernameInput = document.getElementById("username") as HTMLInputElement;
+  const passwordInput = document.getElementById("password") as HTMLInputElement;
+  const errorEl = document.getElementById("login-error")!;
+  const hintEl = document.getElementById("login-hint")!;
+
+  const params = new URLSearchParams(window.location.search);
+  const next = params.get("next") || "/";
+
+  if (!getApiBaseUrl()) {
+    hintEl.textContent =
+      "Define PUBLIC_API_BASE_URL (output ApiUrl de cdk deploy).";
+  }
+
+  if (isAuthenticated()) {
+    window.location.replace(next);
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    errorEl.hidden = true;
+    try {
+      const session = await api.login(usernameInput.value.trim(), passwordInput.value);
+      setAuthSession(session);
+      window.location.href = next.startsWith("/") ? next : "/";
+    } catch (error) {
+      errorEl.hidden = false;
+      errorEl.textContent =
+        error instanceof ApiClientError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "No se pudo iniciar sesión";
+    }
+  });
+</script>

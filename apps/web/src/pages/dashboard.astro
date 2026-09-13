@@ -4,7 +4,9 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
 <BaseLayout title="Dashboard" active="dashboard">
   <h1>Dashboard</h1>
-  <p class="lede">Totales del rango reciente (STATS#DAILY).</p>
+  <p class="lede">
+    Encuesta KAP: una gráfica por pregunta, con respuestas unificadas (mayúsculas/minúsculas).
+  </p>
 
   <div class="stats" id="stats">
     <div class="stat"><strong id="stat-uploaded">—</strong><span>Uploaded</span></div>
@@ -13,19 +15,56 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     <div class="stat"><strong id="stat-processing">—</strong><span>Processing</span></div>
   </div>
 
+  <div class="stats" id="analytics-stats" style="margin-top: 1rem;">
+    <div class="stat"><strong id="stat-analyzed">—</strong><span>Analizados</span></div>
+    <div class="stat"><strong id="stat-matched">—</strong><span>Coinciden filtro</span></div>
+    <div class="stat"><strong id="stat-confidence">—</strong><span>Confianza OCR</span></div>
+    <div class="stat"><strong id="stat-words">—</strong><span>Palabras</span></div>
+  </div>
+
+  <section class="panel" style="margin-top: 1.25rem;">
+    <h2 style="font-family: var(--font-display); font-weight: 400; margin-top: 0;">Filtros</h2>
+    <div class="filter-bar" id="filter-bar"></div>
+    <div class="row" style="margin-top: 0.85rem;">
+      <button class="btn" id="apply-filters" type="button">Aplicar</button>
+      <button class="btn btn-ghost" id="clear-filters" type="button">Limpiar</button>
+      <span class="muted" id="filter-summary"></span>
+    </div>
+  </section>
+
+  <div class="charts-grid">
+    <section class="panel chart-panel">
+      <h2>Documentos por día</h2>
+      <canvas id="chart-volume" height="180"></canvas>
+    </section>
+    <section class="panel chart-panel">
+      <h2>Distribución filtrada</h2>
+      <canvas id="chart-filter-field" height="180"></canvas>
+      <p class="muted" id="chart-filter-empty" hidden>Elige un filtro o espera datos tabulados.</p>
+    </section>
+  </div>
+
   <div class="panel" style="margin-top: 1.25rem;">
-    <h2 style="font-family: var(--font-display); font-weight: 400; margin-top: 0;">Últimos días</h2>
+    <h2 style="font-family: var(--font-display); font-weight: 400; margin-top: 0;">Respuestas por pregunta</h2>
+    <div id="fields-charts" class="fields-charts"></div>
+    <p class="muted" id="fields-empty" hidden>Sin campos para graficar con este filtro.</p>
+  </div>
+
+  <div class="panel" style="margin-top: 1.25rem;">
+    <h2 style="font-family: var(--font-display); font-weight: 400; margin-top: 0;">Documentos filtrados</h2>
     <table class="table">
       <thead>
         <tr>
-          <th>Fecha</th>
-          <th>Uploaded</th>
-          <th>Completed</th>
-          <th>Failed</th>
+          <th>Archivo</th>
+          <th>Profesión</th>
+          <th>Género</th>
+          <th>Edad</th>
+          <th>Entorno</th>
+          <th></th>
         </tr>
       </thead>
-      <tbody id="series-body">
-        <tr><td colspan="4" class="muted">Cargando…</td></tr>
+      <tbody id="docs-body">
+        <tr><td colspan="6" class="muted">Cargando…</td></tr>
       </tbody>
     </table>
     <p class="error" id="dash-error" hidden></p>
@@ -34,38 +73,280 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
 <script>
   import { api, ApiClientError } from "../lib/api";
+  import Chart from "chart.js/auto";
 
   const uploaded = document.getElementById("stat-uploaded")!;
   const completed = document.getElementById("stat-completed")!;
   const failed = document.getElementById("stat-failed")!;
   const processing = document.getElementById("stat-processing")!;
-  const seriesBody = document.getElementById("series-body")!;
+  const analyzed = document.getElementById("stat-analyzed")!;
+  const matched = document.getElementById("stat-matched")!;
+  const confidence = document.getElementById("stat-confidence")!;
+  const words = document.getElementById("stat-words")!;
+  const filterBar = document.getElementById("filter-bar")!;
+  const filterSummary = document.getElementById("filter-summary")!;
+  const applyBtn = document.getElementById("apply-filters") as HTMLButtonElement;
+  const clearBtn = document.getElementById("clear-filters") as HTMLButtonElement;
+  const fieldsCharts = document.getElementById("fields-charts")!;
+  const fieldsEmpty = document.getElementById("fields-empty")!;
+  const docsBody = document.getElementById("docs-body")!;
+  const chartFilterEmpty = document.getElementById("chart-filter-empty")!;
   const errorEl = document.getElementById("dash-error")!;
+
+  const palette = ["#1f6f4a", "#c45c26", "#2c5282", "#805ad5", "#b7791f", "#319795"];
+
+  const filterKeys = [
+    "profesion",
+    "genero",
+    "edad",
+    "anios_graduado",
+    "entorno_practica",
+    "formacion_postgrado",
+    "formacion_mma",
+    "formacion_paliativos",
+    "codigo",
+  ];
+
+  let fieldOptions: Array<{
+    key: string;
+    label: string;
+    values: Array<{ value: string; count: number }>;
+  }> = [];
+  let volumeChart: ReturnType<typeof Chart> | null = null;
+  let filterChart: ReturnType<typeof Chart> | null = null;
+  const breakdownCharts: Array<ReturnType<typeof Chart>> = [];
+
+  function escapeHtml(value: string): string {
+    return value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+
+  function readFilters(): Record<string, string> {
+    const filters: Record<string, string> = {};
+    for (const key of filterKeys) {
+      const select = document.getElementById(`filter-${key}`) as HTMLSelectElement | null;
+      if (select?.value) {
+        filters[key] = select.value;
+      }
+    }
+    return filters;
+  }
+
+  function renderFilterBar() {
+    filterBar.innerHTML = filterKeys
+      .map((key) => {
+        const field = fieldOptions.find((item) => item.key === key);
+        if (!field || field.values.length === 0) {
+          return "";
+        }
+        const options = field.values
+          .map(
+            (entry) =>
+              `<option value="${escapeHtml(entry.value)}">${escapeHtml(entry.value)} (${entry.count})</option>`,
+          )
+          .join("");
+        return `<label class="filter-field">
+          <span>${escapeHtml(field.label)}</span>
+          <select id="filter-${key}">
+            <option value="">Todos</option>
+            ${options}
+          </select>
+        </label>`;
+      })
+      .join("");
+  }
+
+  function destroyBreakdownCharts() {
+    while (breakdownCharts.length) {
+      breakdownCharts.pop()?.destroy();
+    }
+    fieldsCharts.innerHTML = "";
+  }
+
+  function renderBreakdown(
+    breakdown: Array<{
+      key: string;
+      label: string;
+      values: Array<{ value: string; count: number }>;
+    }>,
+  ) {
+    destroyBreakdownCharts();
+    const usable = breakdown.filter((field) => field.values.length > 0);
+    fieldsEmpty.hidden = usable.length > 0;
+    for (const field of usable) {
+      const wrap = document.createElement("div");
+      wrap.className = "field-chart";
+      const title = document.createElement("h3");
+      title.textContent = field.label;
+      const canvas = document.createElement("canvas");
+      canvas.height = Math.max(140, 28 + field.values.length * 22);
+      wrap.append(title, canvas);
+      fieldsCharts.append(wrap);
+      breakdownCharts.push(
+        new Chart(canvas, {
+          type: "bar",
+          data: {
+            labels: field.values.map((v) => v.value),
+            datasets: [
+              {
+                label: field.label,
+                data: field.values.map((v) => v.count),
+                backgroundColor: palette[breakdownCharts.length % palette.length],
+              },
+            ],
+          },
+          options: {
+            indexAxis: "y",
+            plugins: { legend: { display: false } },
+            scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
+          },
+        }),
+      );
+    }
+  }
+
+  function renderFilterChart(
+    breakdown: Array<{
+      key: string;
+      label: string;
+      values: Array<{ value: string; count: number }>;
+    }>,
+    activeFilters: Record<string, string>,
+  ) {
+    filterChart?.destroy();
+    filterChart = null;
+
+    const preferred =
+      breakdown.find((field) => !activeFilters[field.key] && field.values.length > 1) ??
+      breakdown.find((field) => field.values.length > 0);
+
+    if (!preferred) {
+      chartFilterEmpty.hidden = false;
+      return;
+    }
+    chartFilterEmpty.hidden = true;
+
+    filterChart = new Chart(document.getElementById("chart-filter-field") as HTMLCanvasElement, {
+      type: "doughnut",
+      data: {
+        labels: preferred.values.map((v) => v.value),
+        datasets: [
+          {
+            data: preferred.values.map((v) => v.count),
+            backgroundColor: palette,
+          },
+        ],
+      },
+      options: {
+        plugins: {
+          legend: { position: "bottom" },
+          title: { display: true, text: preferred.label },
+        },
+      },
+    });
+  }
+
+  function renderDocs(
+    items: Array<{
+      documentId: string;
+      filename: string;
+      fields: Record<string, string>;
+    }>,
+  ) {
+    if (items.length === 0) {
+      docsBody.innerHTML = `<tr><td colspan="6" class="muted">Ningún documento coincide con el filtro.</td></tr>`;
+      return;
+    }
+    docsBody.innerHTML = items
+      .map(
+        (item) => `<tr>
+          <td>${escapeHtml(item.filename)}</td>
+          <td>${escapeHtml(item.fields.profesion ?? "—")}</td>
+          <td>${escapeHtml(item.fields.genero ?? "—")}</td>
+          <td>${escapeHtml(item.fields.edad ?? "—")}</td>
+          <td>${escapeHtml(item.fields.entorno_practica ?? "—")}</td>
+          <td><a href="/documents/detail/?id=${encodeURIComponent(item.documentId)}">Ver</a></td>
+        </tr>`,
+      )
+      .join("");
+  }
+
+  async function loadFiltered() {
+    errorEl.hidden = true;
+    const filters = readFilters();
+    const activeCount = Object.keys(filters).length;
+    filterSummary.textContent =
+      activeCount === 0
+        ? "Sin filtros — mostrando todos los documentos analizados"
+        : `${activeCount} filtro(s) activo(s)`;
+
+    const result = await api.analyticsDocuments(filters);
+    matched.textContent = String(result.total);
+
+    const avgConfidence =
+      result.items.length === 0
+        ? 0
+        : result.items.reduce((sum, item) => sum + item.metrics.avgConfidence, 0) /
+          result.items.length;
+    const totalWords = result.items.reduce(
+      (sum, item) => sum + item.metrics.wordCount,
+      0,
+    );
+    confidence.textContent = `${avgConfidence.toFixed(1)}%`;
+    words.textContent = String(totalWords);
+
+    renderDocs(result.items);
+    renderBreakdown(result.fieldBreakdown);
+    renderFilterChart(result.fieldBreakdown, filters);
+  }
 
   void (async () => {
     try {
-      const summary = await api.statsSummary();
+      const [summary, analytics] = await Promise.all([
+        api.statsSummary(),
+        api.analyticsSummary(),
+      ]);
+
       uploaded.textContent = String(summary.totals.uploaded);
       completed.textContent = String(summary.totals.completed);
       failed.textContent = String(summary.totals.failed);
       processing.textContent = String(summary.totals.processing);
+      analyzed.textContent = String(analytics.totals.documentsAnalyzed);
 
-      if (summary.series.length === 0) {
-        seriesBody.innerHTML = `<tr><td colspan="4" class="muted">Sin stats todavía.</td></tr>`;
-        return;
-      }
+      fieldOptions = analytics.fields;
+      renderFilterBar();
 
-      seriesBody.innerHTML = [...summary.series]
-        .reverse()
-        .map(
-          (day) => `<tr>
-            <td>${day.date}</td>
-            <td>${day.uploaded}</td>
-            <td>${day.completed}</td>
-            <td>${day.failed}</td>
-          </tr>`,
-        )
-        .join("");
+      volumeChart = new Chart(document.getElementById("chart-volume") as HTMLCanvasElement, {
+        type: "bar",
+        data: {
+          labels: summary.series.map((d) => d.date),
+          datasets: [
+            {
+              label: "Completed",
+              data: summary.series.map((d) => d.completed),
+              backgroundColor: palette[0],
+            },
+            {
+              label: "Failed",
+              data: summary.series.map((d) => d.failed),
+              backgroundColor: palette[1],
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: "bottom" } },
+          scales: {
+            x: { stacked: true },
+            y: { stacked: true, beginAtZero: true },
+          },
+        },
+      });
+
+      await loadFiltered();
     } catch (error) {
       errorEl.hidden = false;
       errorEl.textContent =
@@ -76,4 +357,32 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             : "Error cargando dashboard";
     }
   })();
+
+  applyBtn.addEventListener("click", () => {
+    void loadFiltered().catch((error) => {
+      errorEl.hidden = false;
+      errorEl.textContent =
+        error instanceof Error ? error.message : "Error aplicando filtros";
+    });
+  });
+
+  clearBtn.addEventListener("click", () => {
+    for (const key of filterKeys) {
+      const select = document.getElementById(`filter-${key}`) as HTMLSelectElement | null;
+      if (select) select.value = "";
+    }
+    void loadFiltered().catch((error) => {
+      errorEl.hidden = false;
+      errorEl.textContent =
+        error instanceof Error ? error.message : "Error limpiando filtros";
+    });
+  });
+
+  filterBar.addEventListener("change", () => {
+    void loadFiltered().catch((error) => {
+      errorEl.hidden = false;
+      errorEl.textContent =
+        error instanceof Error ? error.message : "Error aplicando filtros";
+    });
+  });
 </script>

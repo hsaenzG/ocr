@@ -5,14 +5,15 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 <BaseLayout title="Upload" active="upload">
   <h1>Upload</h1>
   <p class="lede">
-    JPEG o PNG (Textract no soporta WebP). La API firma URLs; el browser sube directo a S3 y el OCR corre en background.
+    JPEG, PNG o PDF. Cada archivo se firma y sube por separado (con reintentos).
+    Los PDF van con menos concurrencia porque pesan más; el OCR corre en background.
   </p>
 
   <div class="panel" id="upload-root" data-api-ready="false">
-    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Seleccionar imágenes">
-      <strong>Arrastra imágenes aquí</strong>
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Seleccionar documentos">
+      <strong>Arrastra imágenes o PDFs aquí</strong>
       <div>o haz click para elegir archivos</div>
-      <input id="file-input" type="file" accept="image/jpeg,image/png" multiple hidden />
+      <input id="file-input" type="file" accept="image/jpeg,image/png,application/pdf" multiple hidden />
     </div>
 
     <ul class="file-list" id="file-list"></ul>
@@ -20,7 +21,9 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     <div class="row" style="margin-top: 1rem;">
       <button class="btn" id="upload-btn" type="button" disabled>Subir todos</button>
       <button class="btn btn-ghost" id="clear-btn" type="button">Limpiar</button>
+      <button class="btn btn-ghost" id="retry-btn" type="button" hidden>Reintentar fallidos</button>
     </div>
+    <p class="muted" id="upload-progress" hidden></p>
     <p class="success-msg" id="upload-success" hidden></p>
     <p class="error" id="upload-error" hidden></p>
     <p class="muted" id="upload-hint"></p>
@@ -37,17 +40,20 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     documentId?: string;
   };
 
-  const allowed = new Set(["image/jpeg", "image/png"]);
+  const allowed = new Set(["image/jpeg", "image/png", "application/pdf"]);
   const queue: QueueItem[] = [];
-  const maxConcurrent = 4;
+  const maxRetries = 3;
+  let uploading = false;
 
   const dropzone = document.getElementById("dropzone")!;
   const fileInput = document.getElementById("file-input") as HTMLInputElement;
   const fileList = document.getElementById("file-list")!;
   const uploadBtn = document.getElementById("upload-btn") as HTMLButtonElement;
   const clearBtn = document.getElementById("clear-btn") as HTMLButtonElement;
+  const retryBtn = document.getElementById("retry-btn") as HTMLButtonElement;
   const errorEl = document.getElementById("upload-error")!;
   const successEl = document.getElementById("upload-success")!;
+  const progressEl = document.getElementById("upload-progress")!;
   const hintEl = document.getElementById("upload-hint")!;
 
   if (!getApiBaseUrl()) {
@@ -57,7 +63,15 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     hintEl.textContent = `API: ${getApiBaseUrl()}`;
   }
 
+  function concurrencyFor(files: QueueItem[]): number {
+    const hasHeavyPdf = files.some(
+      (item) => item.file.type === "application/pdf" && item.file.size > 2 * 1024 * 1024,
+    );
+    return hasHeavyPdf ? 2 : 4;
+  }
+
   function render() {
+    const failed = queue.filter((item) => item.status === "error").length;
     fileList.innerHTML = queue
       .map((item) => {
         const badgeClass =
@@ -79,7 +93,13 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         return `<li><span>${item.file.name} · ${(item.file.size / 1024).toFixed(1)} KB</span><span class="badge ${badgeClass}">${label}${item.message ? ` — ${item.message}` : ""}</span></li>`;
       })
       .join("");
-    uploadBtn.disabled = queue.length === 0 || !getApiBaseUrl();
+    uploadBtn.disabled =
+      uploading ||
+      queue.every((item) => item.status === "done") ||
+      queue.length === 0 ||
+      !getApiBaseUrl();
+    retryBtn.hidden = failed === 0 || uploading;
+    clearBtn.disabled = uploading;
   }
 
   function addFiles(files: FileList | File[]) {
@@ -88,7 +108,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     for (const file of Array.from(files)) {
       if (!allowed.has(file.type)) {
         errorEl.hidden = false;
-        errorEl.textContent = `Archivo rechazado (solo JPEG/PNG; Textract no soporta WebP): ${file.name}`;
+        errorEl.textContent = `Archivo rechazado (solo JPEG/PNG/PDF; Textract no soporta WebP): ${file.name}`;
         continue;
       }
       queue.push({ file, status: "pending" });
@@ -96,11 +116,132 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     render();
   }
 
-  dropzone.addEventListener("click", () => fileInput.click());
+  async function sleep(ms: number) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function putWithRetry(
+    uploadUrl: string,
+    headers: Record<string, string>,
+    file: File,
+  ): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const put = await fetch(uploadUrl, {
+          method: "PUT",
+          headers,
+          body: file,
+        });
+        if (!put.ok) {
+          throw new Error(`S3 PUT ${put.status}`);
+        }
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxRetries) {
+          await sleep(500 * 2 ** (attempt - 1));
+        }
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("upload failed");
+  }
+
+  /** One file: presign → PUT (retries). Avoids orphan META for files never attempted. */
+  async function uploadOne(item: QueueItem): Promise<void> {
+    item.status = "uploading";
+    item.message = "firmando…";
+    render();
+
+    const { uploads } = await api.presign([
+      {
+        filename: item.file.name,
+        contentType: item.file.type,
+        sizeBytes: item.file.size,
+      },
+    ]);
+    const signed = uploads[0];
+    if (!signed) {
+      throw new Error("Presign vacío");
+    }
+
+    item.documentId = signed.documentId;
+    item.message = "subiendo…";
+    render();
+
+    await putWithRetry(signed.uploadUrl, signed.headers, item.file);
+    item.status = "done";
+    item.message = "en cola para OCR";
+  }
+
+  async function runQueue(items: QueueItem[]) {
+    if (items.length === 0) return;
+
+    uploading = true;
+    errorEl.hidden = true;
+    successEl.hidden = true;
+    progressEl.hidden = false;
+    render();
+
+    const concurrency = concurrencyFor(items);
+    let index = 0;
+    let doneCount = 0;
+    let failCount = 0;
+
+    async function worker() {
+      while (index < items.length) {
+        const current = index++;
+        const item = items[current];
+        progressEl.textContent = `Subiendo ${Math.min(doneCount + failCount + 1, items.length)}/${items.length} (concurrencia ${concurrency})…`;
+        try {
+          await uploadOne(item);
+          doneCount += 1;
+        } catch (error) {
+          item.status = "error";
+          item.message =
+            error instanceof ApiClientError
+              ? error.message
+              : error instanceof Error
+                ? error.message
+                : "upload failed";
+          failCount += 1;
+        }
+        render();
+      }
+    }
+
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
+      );
+
+      if (doneCount > 0) {
+        successEl.hidden = false;
+        successEl.innerHTML =
+          doneCount === 1
+            ? `Documento subido correctamente. El OCR se ejecuta en background — <a href="/documents">ver documentos</a>.`
+            : `${doneCount} documentos subidos correctamente. El OCR se ejecuta en background — <a href="/documents">ver documentos</a>.`;
+        if (failCount > 0) {
+          successEl.innerHTML += ` (${failCount} fallaron — usa Reintentar fallidos)`;
+        }
+      } else if (failCount > 0) {
+        errorEl.hidden = false;
+        errorEl.textContent = `Ningún archivo se subió (${failCount} fallaron).`;
+      }
+    } finally {
+      uploading = false;
+      progressEl.hidden = true;
+      render();
+    }
+  }
+
+  dropzone.addEventListener("click", () => {
+    if (!uploading) fileInput.click();
+  });
   dropzone.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      fileInput.click();
+      if (!uploading) fileInput.click();
     }
   });
   fileInput.addEventListener("change", () => {
@@ -115,84 +256,37 @@ import BaseLayout from "../layouts/BaseLayout.astro";
   dropzone.addEventListener("drop", (event) => {
     event.preventDefault();
     dropzone.classList.remove("dragover");
-    if (event.dataTransfer?.files) addFiles(event.dataTransfer.files);
+    if (!uploading && event.dataTransfer?.files) addFiles(event.dataTransfer.files);
   });
 
   clearBtn.addEventListener("click", () => {
+    if (uploading) return;
     queue.splice(0, queue.length);
     successEl.hidden = true;
     errorEl.hidden = true;
+    progressEl.hidden = true;
     render();
   });
 
-  uploadBtn.addEventListener("click", async () => {
-    errorEl.hidden = true;
-    successEl.hidden = true;
-    uploadBtn.disabled = true;
-    const pending = queue.filter((item) => item.status === "pending" || item.status === "error");
-    try {
-      const { uploads } = await api.presign(
-        pending.map((item) => ({
-          filename: item.file.name,
-          contentType: item.file.type,
-          sizeBytes: item.file.size,
-        })),
-      );
+  uploadBtn.addEventListener("click", () => {
+    const pending = queue.filter((item) => item.status === "pending");
+    void runQueue(pending);
+  });
 
-      let index = 0;
-      async function worker() {
-        while (index < pending.length) {
-          const current = index++;
-          const item = pending[current];
-          const signed = uploads[current];
-          item.status = "uploading";
-          item.documentId = signed.documentId;
-          render();
-          try {
-            const put = await fetch(signed.uploadUrl, {
-              method: "PUT",
-              headers: signed.headers,
-              body: item.file,
-            });
-            if (!put.ok) {
-              throw new Error(`S3 PUT ${put.status}`);
-            }
-            item.status = "done";
-            item.message = "en cola para OCR";
-          } catch (error) {
-            item.status = "error";
-            item.message = error instanceof Error ? error.message : "upload failed";
-          }
-          render();
-        }
-      }
+  retryBtn.addEventListener("click", () => {
+    const failed = queue.filter((item) => item.status === "error");
+    for (const item of failed) {
+      item.status = "pending";
+      item.message = undefined;
+      item.documentId = undefined;
+    }
+    void runQueue(failed);
+  });
 
-      await Promise.all(
-        Array.from({ length: Math.min(maxConcurrent, pending.length) }, () => worker()),
-      );
-
-      const doneCount = pending.filter((item) => item.status === "done").length;
-      const failCount = pending.filter((item) => item.status === "error").length;
-      if (doneCount > 0) {
-        successEl.hidden = false;
-        successEl.innerHTML =
-          doneCount === 1
-            ? `Imagen subida correctamente. El OCR se ejecuta en background — <a href="/documents">ver documentos</a>.`
-            : `${doneCount} imágenes subidas correctamente. El OCR se ejecuta en background — <a href="/documents">ver documentos</a>.`;
-        if (failCount > 0) {
-          successEl.innerHTML += ` (${failCount} fallaron)`;
-        }
-      }
-    } catch (error) {
-      errorEl.hidden = false;
-      errorEl.textContent =
-        error instanceof ApiClientError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : "Upload failed";
-    } finally {
-      render();
+  window.addEventListener("beforeunload", (event) => {
+    if (uploading) {
+      event.preventDefault();
+      event.returnValue = "";
     }
   });
 

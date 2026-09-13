@@ -3,8 +3,8 @@ import type { ApiErrorBody } from "@ocr/shared";
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
-  "access-control-allow-headers": "content-type",
-  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-headers": "content-type,authorization",
+  "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
 };
 
 export function jsonResponse(

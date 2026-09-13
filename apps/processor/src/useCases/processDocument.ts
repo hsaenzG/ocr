@@ -1,5 +1,9 @@
-import { isAllowedImageContentType } from "@ocr/shared";
+import {
+  isAllowedImageContentType,
+  isPdfContentType,
+} from "@ocr/shared";
 import type {
+  AsyncOcrEngine,
   Clock,
   DocumentStore,
   IdGenerator,
@@ -21,6 +25,7 @@ export function createProcessDocumentUseCase(deps: {
   documents: DocumentStore;
   objectReader: ObjectReader;
   ocr: OcrEngine;
+  asyncOcr: AsyncOcrEngine;
   clock: Clock;
   ids: IdGenerator;
 }) {
@@ -57,9 +62,23 @@ export function createProcessDocumentUseCase(deps: {
       }
 
       const contentType = objectMeta.contentType ?? meta.contentType;
+      const jobId = deps.ids.newId();
+      const startedAt = deps.clock.nowIso();
+
+      if (isPdfContentType(contentType)) {
+        await deps.documents.markProcessing(documentId, jobId, startedAt);
+        await startAsyncJob({
+          deps,
+          documentId,
+          jobId,
+          startedAt,
+          bucket: input.bucket,
+          key: input.key,
+        });
+        return;
+      }
+
       if (!isAllowedImageContentType(contentType)) {
-        const jobId = deps.ids.newId();
-        const startedAt = deps.clock.nowIso();
         await deps.documents.markProcessing(documentId, jobId, startedAt);
         await deps.documents.markFailed({
           documentId,
@@ -72,8 +91,6 @@ export function createProcessDocumentUseCase(deps: {
         return;
       }
 
-      const jobId = deps.ids.newId();
-      const startedAt = deps.clock.nowIso();
       await deps.documents.markProcessing(documentId, jobId, startedAt);
 
       try {
@@ -89,19 +106,70 @@ export function createProcessDocumentUseCase(deps: {
         if (isLikelyTransient(error)) {
           throw error;
         }
-        const message =
-          error instanceof Error ? error.message : "Unknown OCR failure";
         await deps.documents.markFailed({
           documentId,
           jobId,
           startedAt,
           endedAt: deps.clock.nowIso(),
           errorCode: "OCR_FAILED",
-          errorMessage: message,
+          errorMessage: errorMessageOf(error, "Unknown OCR failure"),
         });
       }
     },
   };
+}
+
+/**
+ * PDFs are handed to Textract as a job; completion arrives later via SNS → SQS,
+ * so the document stays PROCESSING until the result handler runs.
+ */
+async function startAsyncJob(input: {
+  deps: {
+    documents: DocumentStore;
+    asyncOcr: AsyncOcrEngine;
+    clock: Clock;
+  };
+  documentId: string;
+  jobId: string;
+  startedAt: string;
+  bucket: string;
+  key: string;
+}): Promise<void> {
+  const { deps, documentId, jobId, startedAt } = input;
+
+  try {
+    const { textractJobId } = await deps.asyncOcr.startTextDetection({
+      bucket: input.bucket,
+      key: input.key,
+      clientRequestToken: jobId,
+      jobTag: documentId,
+    });
+
+    await deps.documents.linkTextractJob({
+      textractJobId,
+      documentId,
+      jobId,
+      startedAt,
+    });
+
+    console.log("Started async Textract job", {
+      documentId,
+      jobId,
+      textractJobId,
+    });
+  } catch (error) {
+    if (isLikelyTransient(error)) {
+      throw error;
+    }
+    await deps.documents.markFailed({
+      documentId,
+      jobId,
+      startedAt,
+      endedAt: deps.clock.nowIso(),
+      errorCode: "OCR_START_FAILED",
+      errorMessage: errorMessageOf(error, "Could not start Textract job"),
+    });
+  }
 }
 
 function documentIdFromKey(key: string): string | null {
@@ -110,6 +178,10 @@ function documentIdFromKey(key: string): string | null {
     return null;
   }
   return parts[parts.length - 2] ?? null;
+}
+
+function errorMessageOf(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function isLikelyTransient(error: unknown): boolean {

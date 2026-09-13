@@ -12,7 +12,7 @@
   --font-sans: "DM Sans", system-ui, sans-serif;
   --font-display: "Instrument Serif", Georgia, serif;
   --radius: 10px;
-  --max: 1080px;
+  --max: 1280px;
 }
 
 * {
@@ -240,11 +240,16 @@ h1 {
 
 .preview {
   width: 100%;
-  max-height: 480px;
+  max-height: min(85vh, 920px);
   object-fit: contain;
   border-radius: var(--radius);
   background: #0a0f0c;
   border: 1px solid var(--line);
+}
+
+iframe.preview {
+  height: min(85vh, 920px);
+  min-height: 640px;
 }
 
 .detail-grid {
@@ -254,8 +259,14 @@ h1 {
 
 @media (min-width: 860px) {
   .detail-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1.45fr 1fr;
+    align-items: start;
   }
+}
+
+.detail-grid > .panel:first-child {
+  position: sticky;
+  top: 1rem;
 }
 
 .plain {
@@ -290,6 +301,56 @@ h1 {
   color: var(--accent-ink);
   background: var(--accent);
   border-color: transparent;
+}
+
+.filter-bar {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+.filter-field {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.filter-field select {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #0f1612;
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+}
+
+.login-form {
+  max-width: 420px;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.login-form label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.login-form input {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #0f1612;
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+}
+
+.nav-logout {
+  margin-left: 0.35rem;
 }
 
 .success-msg {
@@ -336,4 +397,97 @@ h1 {
 .footer-meta {
   font-size: 0.8rem;
   opacity: 0.85;
+}
+
+.charts-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+@media (min-width: 900px) {
+  .charts-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.chart-panel h2,
+.field-chart h3 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+}
+
+.fields-charts {
+  display: grid;
+  gap: 1.25rem;
+}
+
+@media (min-width: 900px) {
+  .fields-charts {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.field-chart {
+  padding: 0.75rem 0 0.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.analytics-table th,
+.analytics-table td {
+  text-align: left;
+  padding: 0.45rem 0.35rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.analytics-toolbar {
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.25rem 0 0.5rem;
+  flex-wrap: wrap;
+}
+
+.field-edit-input {
+  width: 100%;
+  min-width: 12rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #c5cdd0;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #111111;
+  caret-color: #111111;
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.field-edit-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: color-mix(in srgb, var(--accent) 55%, #c5cdd0);
+}
+
+.field-edit-input::placeholder {
+  color: #6b7280;
+}
+
+.field-corrected {
+  margin-left: 0.35rem;
+  font-size: 0.7rem;
+  vertical-align: middle;
+}
+
+.analytics-table th {
+  color: var(--muted);
+  font-weight: 500;
 }

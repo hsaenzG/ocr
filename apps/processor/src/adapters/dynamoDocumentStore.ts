@@ -11,6 +11,7 @@ import type {
   DocumentStatus,
   DocumentStore,
   OcrResult,
+  TextractJobLink,
 } from "../ports.js";
 
 export function createDynamoDocumentStore(deps: {
@@ -192,6 +193,43 @@ export function createDynamoDocumentStore(deps: {
         failed: 1,
       });
     },
+
+    async linkTextractJob(link: TextractJobLink): Promise<void> {
+      await doc.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            PK: `TEXTRACT#${link.textractJobId}`,
+            SK: "LINK",
+            entityType: "TEXTRACT_JOB_LINK",
+            textractJobId: link.textractJobId,
+            documentId: link.documentId,
+            jobId: link.jobId,
+            startedAt: link.startedAt,
+          },
+        }),
+      );
+    },
+
+    async findTextractJobLink(
+      textractJobId: string,
+    ): Promise<TextractJobLink | null> {
+      const result = await doc.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: { PK: `TEXTRACT#${textractJobId}`, SK: "LINK" },
+        }),
+      );
+      if (!result.Item) {
+        return null;
+      }
+      return {
+        textractJobId: String(result.Item.textractJobId),
+        documentId: String(result.Item.documentId),
+        jobId: String(result.Item.jobId),
+        startedAt: String(result.Item.startedAt),
+      };
+    },
   };
 }
 
@@ -209,7 +247,7 @@ async function transitionStatus(
       TableName: tableName,
       Key: { PK: `DOC#${meta.documentId}`, SK: "META" },
       UpdateExpression:
-        "SET #status = :status, updatedAt = :updatedAt, completedAt = :completedAt, errorMessage = :errorMessage",
+        "SET #status = :status, updatedAt = :updatedAt, completedAt = :completedAt, errorMessage = :errorMessage REMOVE expiresAt",
       ExpressionAttributeNames: { "#status": "status" },
       ExpressionAttributeValues: {
         ":status": nextStatus,
@@ -227,7 +265,8 @@ async function transitionStatus(
         PK: "DOCS",
         SK: `TS#${meta.createdAt}#DOC#${meta.documentId}`,
       },
-      UpdateExpression: "SET #status = :status, updatedAt = :updatedAt",
+      UpdateExpression:
+        "SET #status = :status, updatedAt = :updatedAt REMOVE expiresAt",
       ExpressionAttributeNames: { "#status": "status" },
       ExpressionAttributeValues: {
         ":status": nextStatus,

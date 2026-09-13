@@ -11,8 +11,11 @@ import * as apigwv2 from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as s3n from "aws-cdk-lib/aws-s3-notifications";
+import * as sns from "aws-cdk-lib/aws-sns";
+import * as snsSubscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import * as sqs from "aws-cdk-lib/aws-sqs";
-import { SqsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
+import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import { SqsEventSource, DynamoEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
 
 export class OcrStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -20,6 +23,7 @@ export class OcrStack extends cdk.Stack {
 
     const uploadPrefix = "uploads/";
     const maxUploadBytes = "10485760";
+    const maxPdfUploadBytes = "52428800";
 
     const docsBucket = new s3.Bucket(this, "DocsBucket", {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -53,6 +57,8 @@ export class OcrStack extends cdk.Stack {
       partitionKey: { name: "PK", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "SK", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      stream: dynamodb.StreamViewType.NEW_IMAGE,
+      timeToLiveAttribute: "expiresAt",
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
@@ -74,6 +80,60 @@ export class OcrStack extends cdk.Stack {
       new s3n.SqsDestination(processingQueue),
       { prefix: uploadPrefix },
     );
+
+    // --- Async Textract channel (multipage PDF) ---
+    const textractTopic = new sns.Topic(this, "TextractCompletionTopic", {
+      displayName: "Textract async job completion",
+    });
+
+    const textractPublishRole = new iam.Role(this, "TextractPublishRole", {
+      assumedBy: new iam.ServicePrincipal("textract.amazonaws.com"),
+      description: "Lets Textract publish async job completion to SNS",
+    });
+    textractTopic.grantPublish(textractPublishRole);
+
+    const textractResultsDlq = new sqs.Queue(this, "TextractResultsDlq", {
+      retentionPeriod: cdk.Duration.days(14),
+    });
+
+    const textractResultsQueue = new sqs.Queue(this, "TextractResultsQueue", {
+      visibilityTimeout: cdk.Duration.seconds(360),
+      retentionPeriod: cdk.Duration.days(4),
+      deadLetterQueue: {
+        queue: textractResultsDlq,
+        maxReceiveCount: 3,
+      },
+    });
+
+    textractTopic.addSubscription(
+      new snsSubscriptions.SqsSubscription(textractResultsQueue),
+    );
+
+    const authUsername =
+      (this.node.tryGetContext("authUsername") as string | undefined) ?? "natalia";
+    const authPasswordFromContext = this.node.tryGetContext("authPassword") as
+      | string
+      | undefined;
+
+    // Single-user auth. Prefer Secrets Manager; password can be provided via
+    // `-c authPassword=...` or auto-generated on first deploy.
+    const authSecret = authPasswordFromContext
+      ? new secretsmanager.Secret(this, "OcrAuthSecret", {
+          description: "OCR single-user credentials (username/password)",
+          secretObjectValue: {
+            username: cdk.SecretValue.unsafePlainText(authUsername),
+            password: cdk.SecretValue.unsafePlainText(authPasswordFromContext),
+          },
+        })
+      : new secretsmanager.Secret(this, "OcrAuthSecret", {
+          description: "OCR single-user credentials (username + generated password)",
+          generateSecretString: {
+            secretStringTemplate: JSON.stringify({ username: authUsername }),
+            generateStringKey: "password",
+            excludeCharacters: " %+~`#$&*()|[]{}:;<>?!'/@\"\\",
+            passwordLength: 32,
+          },
+        });
 
     const apiFn = new NodejsFunction(this, "ApiFunction", {
       entry: path.join(__dirname, "../../apps/api/src/handler.ts"),
@@ -97,12 +157,15 @@ export class OcrStack extends cdk.Stack {
         DOCS_BUCKET_NAME: docsBucket.bucketName,
         UPLOAD_PREFIX: uploadPrefix,
         MAX_UPLOAD_BYTES: maxUploadBytes,
+        MAX_PDF_UPLOAD_BYTES: maxPdfUploadBytes,
+        AUTH_SECRET_ARN: authSecret.secretArn,
       },
     });
 
     table.grantReadWriteData(apiFn);
     docsBucket.grantPut(apiFn, `${uploadPrefix}*`);
     docsBucket.grantRead(apiFn);
+    authSecret.grantRead(apiFn);
 
     const processorFn = new NodejsFunction(this, "ProcessorFunction", {
       entry: path.join(__dirname, "../../apps/processor/src/handler.ts"),
@@ -123,6 +186,8 @@ export class OcrStack extends cdk.Stack {
       },
       environment: {
         TABLE_NAME: table.tableName,
+        TEXTRACT_TOPIC_ARN: textractTopic.topicArn,
+        TEXTRACT_PUBLISH_ROLE_ARN: textractPublishRole.roleArn,
       },
     });
 
@@ -130,8 +195,20 @@ export class OcrStack extends cdk.Stack {
     docsBucket.grantRead(processorFn);
     processorFn.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: ["textract:DetectDocumentText"],
+        actions: [
+          "textract:DetectDocumentText",
+          "textract:StartDocumentTextDetection",
+        ],
         resources: ["*"],
+      }),
+    );
+    processorFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["iam:PassRole"],
+        resources: [textractPublishRole.roleArn],
+        conditions: {
+          StringEquals: { "iam:PassedToService": "textract.amazonaws.com" },
+        },
       }),
     );
     processorFn.addEventSource(
@@ -141,14 +218,99 @@ export class OcrStack extends cdk.Stack {
       }),
     );
 
+    const textractResultFn = new NodejsFunction(this, "TextractResultFunction", {
+      entry: path.join(
+        __dirname,
+        "../../apps/processor/src/textractResultHandler.ts",
+      ),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_24_X,
+      timeout: cdk.Duration.seconds(120),
+      memorySize: 1024,
+      projectRoot: path.join(__dirname, "../.."),
+      depsLockFilePath: path.join(__dirname, "../../package-lock.json"),
+      bundling: {
+        minify: true,
+        sourceMap: true,
+        target: "node24",
+        format: OutputFormat.ESM,
+        banner:
+          "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+        mainFields: ["module", "main"],
+      },
+      environment: {
+        TABLE_NAME: table.tableName,
+        TEXTRACT_TOPIC_ARN: textractTopic.topicArn,
+        TEXTRACT_PUBLISH_ROLE_ARN: textractPublishRole.roleArn,
+      },
+    });
+
+    table.grantReadWriteData(textractResultFn);
+    textractResultFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["textract:GetDocumentTextDetection"],
+        resources: ["*"],
+      }),
+    );
+    textractResultFn.addEventSource(
+      new SqsEventSource(textractResultsQueue, {
+        batchSize: 1,
+        reportBatchItemFailures: true,
+      }),
+    );
+
+    const analyticsStreamFn = new NodejsFunction(this, "AnalyticsStreamFunction", {
+      entry: path.join(
+        __dirname,
+        "../../apps/processor/src/analyticsStreamHandler.ts",
+      ),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_24_X,
+      timeout: cdk.Duration.seconds(120),
+      memorySize: 512,
+      projectRoot: path.join(__dirname, "../.."),
+      depsLockFilePath: path.join(__dirname, "../../package-lock.json"),
+      bundling: {
+        minify: true,
+        sourceMap: true,
+        target: "node24",
+        format: OutputFormat.ESM,
+        banner:
+          "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+        mainFields: ["module", "main"],
+      },
+      environment: {
+        TABLE_NAME: table.tableName,
+        ANALYTICS_PARSER: "bedrock",
+        BEDROCK_MODEL_ID: "amazon.nova-lite-v1:0",
+      },
+    });
+
+    table.grantReadWriteData(analyticsStreamFn);
+    analyticsStreamFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+        resources: ["*"],
+      }),
+    );
+    analyticsStreamFn.addEventSource(
+      new DynamoEventSource(table, {
+        startingPosition: lambda.StartingPosition.LATEST,
+        batchSize: 1,
+        retryAttempts: 3,
+        reportBatchItemFailures: true,
+      }),
+    );
+
     const httpApi = new apigwv2.HttpApi(this, "OcrHttpApi", {
       apiName: "ocr-api",
-      description: "OCR API — presign, documents, stats",
+      description: "OCR API — presign, documents, stats, analytics",
       corsPreflight: {
-        allowHeaders: ["content-type"],
+        allowHeaders: ["content-type", "authorization"],
         allowMethods: [
           apigwv2.CorsHttpMethod.GET,
           apigwv2.CorsHttpMethod.POST,
+          apigwv2.CorsHttpMethod.PUT,
           apigwv2.CorsHttpMethod.OPTIONS,
         ],
         allowOrigins: ["*"],
@@ -248,6 +410,14 @@ export class OcrStack extends cdk.Stack {
     new cdk.CfnOutput(this, "ApiUrl", {
       value: httpApi.apiEndpoint,
       description: "HTTP API base URL (set as PUBLIC_API_BASE_URL for Astro)",
+    });
+    new cdk.CfnOutput(this, "AuthSecretArn", {
+      value: authSecret.secretArn,
+      description: "Secrets Manager ARN with { username, password }",
+    });
+    new cdk.CfnOutput(this, "AuthUsername", {
+      value: authUsername,
+      description: "Single-user login username",
     });
     new cdk.CfnOutput(this, "DocsBucketName", {
       value: docsBucket.bucketName,

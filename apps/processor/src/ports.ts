@@ -47,6 +47,24 @@ export interface OcrEngine {
   extractText(bucket: string, key: string): Promise<OcrResult>;
 }
 
+/** Multi-page documents (PDF) can't run in the request/invocation window. */
+export interface AsyncOcrEngine {
+  startTextDetection(input: {
+    bucket: string;
+    key: string;
+    clientRequestToken: string;
+    jobTag: string;
+  }): Promise<{ textractJobId: string }>;
+  fetchTextDetection(textractJobId: string): Promise<OcrResult>;
+}
+
+export interface TextractJobLink {
+  textractJobId: string;
+  documentId: string;
+  jobId: string;
+  startedAt: string;
+}
+
 export interface DocumentStore {
   getMetaByS3Key(bucket: string, key: string): Promise<DocumentMeta | null>;
   getMeta(documentId: string): Promise<DocumentMeta | null>;
@@ -66,4 +84,6 @@ export interface DocumentStore {
     errorCode: string;
     errorMessage: string;
   }): Promise<void>;
+  linkTextractJob(link: TextractJobLink): Promise<void>;
+  findTextractJobLink(textractJobId: string): Promise<TextractJobLink | null>;
 }

@@ -5,7 +5,8 @@ import type {
   ObjectStore,
 } from "../ports.js";
 import {
-  isAllowedImageContentType,
+  isAllowedContentType,
+  isPdfContentType,
   type PresignFileRequest,
   type PresignUploadsResponse,
 } from "@ocr/shared";
@@ -30,6 +31,7 @@ export function createPresignUploadsUseCase(deps: {
   ids: IdGenerator;
   uploadPrefix: string;
   maxUploadBytes: number;
+  maxPdfUploadBytes: number;
   docsBucketName: string;
 }) {
   return {
@@ -57,22 +59,26 @@ export function createPresignUploadsUseCase(deps: {
             "Each file requires filename and contentType",
           );
         }
-        if (!isAllowedImageContentType(file.contentType)) {
+        if (!isAllowedContentType(file.contentType)) {
           throw new HttpError(
             400,
             "UNSUPPORTED_CONTENT_TYPE",
-            `Only image/jpeg and image/png allowed (got ${file.contentType})`,
+            `Only image/jpeg, image/png and application/pdf allowed (got ${file.contentType})`,
           );
         }
+
+        const maxBytes = isPdfContentType(file.contentType)
+          ? deps.maxPdfUploadBytes
+          : deps.maxUploadBytes;
         if (
           !Number.isFinite(file.sizeBytes) ||
           file.sizeBytes <= 0 ||
-          file.sizeBytes > deps.maxUploadBytes
+          file.sizeBytes > maxBytes
         ) {
           throw new HttpError(
             400,
             "INVALID_SIZE",
-            `sizeBytes must be between 1 and ${deps.maxUploadBytes}`,
+            `sizeBytes must be between 1 and ${maxBytes} for ${file.contentType}`,
           );
         }
 
@@ -101,6 +107,8 @@ export function createPresignUploadsUseCase(deps: {
           createdAt: now,
           updatedAt: now,
           errorMessage: null,
+          // If the browser never PUTs, Dynamo TTL drops META + listing projections.
+          expiresAt: Math.floor(Date.parse(now) / 1000) + 60 * 60 * 24,
         });
 
         uploads.push({
@@ -121,8 +129,8 @@ export function createPresignUploadsUseCase(deps: {
 }
 
 function sanitizeFilename(filename: string): string {
-  const base = filename.split(/[/\\]/).pop() ?? "image";
-  return base.replace(/[^\w.\-()+ ]+/g, "_").slice(0, 180) || "image";
+  const base = filename.split(/[/\\]/).pop() ?? "document";
+  return base.replace(/[^\w.\-()+ ]+/g, "_").slice(0, 180) || "document";
 }
 
 function trimSlash(value: string): string {
