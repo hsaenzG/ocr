@@ -13,7 +13,7 @@ EXTRACT stream → Analytics (Bedrock / heurística) → Dashboard + export PDF
 
 ## Arquitectura
 
-![Arquitectura OCR serverless](docs/architecture.svg)
+![Arquitectura OCR serverless](docs/architecture.png)
 
 1. **Cliente** — Astro estático en Amplify (upload, documentos, dashboard, login).
 2. **API** — HTTP API + Lambda (presign, listado, detalle, analytics, auth, corrección de campos).
@@ -50,7 +50,7 @@ apps/api         Lambda HTTP API
 apps/processor   Workers OCR + analytics stream + textractResult
 packages/shared  Tipos + esquema encuesta KAP
 infra            CDK stack
-docs/            Diagramas (architecture.svg)
+docs/            Diagramas (architecture.svg / .png)
 amplify.yml      Build spec Amplify (CI desde GitHub)
 scripts/         deploy-amplify.sh, backfill-analytics.ts
 ```
