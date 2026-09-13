@@ -28,6 +28,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     <div class="row" style="margin-top: 0.85rem;">
       <button class="btn" id="apply-filters" type="button">Aplicar</button>
       <button class="btn btn-ghost" id="clear-filters" type="button">Limpiar</button>
+      <button class="btn btn-ghost" id="export-pdf-btn" type="button">Exportar PDF</button>
       <span class="muted" id="filter-summary"></span>
     </div>
   </section>
@@ -74,6 +75,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 <script>
   import { api, ApiClientError } from "../lib/api";
   import Chart from "chart.js/auto";
+  import { exportDashboardPdf } from "../lib/exportDashboardPdf";
 
   const uploaded = document.getElementById("stat-uploaded")!;
   const completed = document.getElementById("stat-completed")!;
@@ -87,6 +89,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
   const filterSummary = document.getElementById("filter-summary")!;
   const applyBtn = document.getElementById("apply-filters") as HTMLButtonElement;
   const clearBtn = document.getElementById("clear-filters") as HTMLButtonElement;
+  const exportPdfBtn = document.getElementById("export-pdf-btn") as HTMLButtonElement;
   const fieldsCharts = document.getElementById("fields-charts")!;
   const fieldsEmpty = document.getElementById("fields-empty")!;
   const docsBody = document.getElementById("docs-body")!;
@@ -114,7 +117,12 @@ import BaseLayout from "../layouts/BaseLayout.astro";
   }> = [];
   let volumeChart: ReturnType<typeof Chart> | null = null;
   let filterChart: ReturnType<typeof Chart> | null = null;
-  const breakdownCharts: Array<ReturnType<typeof Chart>> = [];
+  let filterChartTitle = "Distribución filtrada";
+  const breakdownCharts: Array<{
+    title: string;
+    chart: ReturnType<typeof Chart>;
+  }> = [];
+  let lastMatchedTotal = 0;
 
   function escapeHtml(value: string): string {
     return value
@@ -161,7 +169,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
   function destroyBreakdownCharts() {
     while (breakdownCharts.length) {
-      breakdownCharts.pop()?.destroy();
+      breakdownCharts.pop()?.chart.destroy();
     }
     fieldsCharts.innerHTML = "";
   }
@@ -185,26 +193,26 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       canvas.height = Math.max(140, 28 + field.values.length * 22);
       wrap.append(title, canvas);
       fieldsCharts.append(wrap);
-      breakdownCharts.push(
-        new Chart(canvas, {
-          type: "bar",
-          data: {
-            labels: field.values.map((v) => v.value),
-            datasets: [
-              {
-                label: field.label,
-                data: field.values.map((v) => v.count),
-                backgroundColor: palette[breakdownCharts.length % palette.length],
-              },
-            ],
-          },
-          options: {
-            indexAxis: "y",
-            plugins: { legend: { display: false } },
-            scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
-          },
-        }),
-      );
+      const chart = new Chart(canvas, {
+        type: "bar",
+        data: {
+          labels: field.values.map((v) => v.value),
+          datasets: [
+            {
+              label: field.label,
+              data: field.values.map((v) => v.count),
+              backgroundColor: palette[breakdownCharts.length % palette.length],
+            },
+          ],
+        },
+        options: {
+          animation: false,
+          indexAxis: "y",
+          plugins: { legend: { display: false } },
+          scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
+        },
+      });
+      breakdownCharts.push({ title: field.label, chart });
     }
   }
 
@@ -225,9 +233,11 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
     if (!preferred) {
       chartFilterEmpty.hidden = false;
+      filterChartTitle = "Distribución filtrada";
       return;
     }
     chartFilterEmpty.hidden = true;
+    filterChartTitle = preferred.label;
 
     filterChart = new Chart(document.getElementById("chart-filter-field") as HTMLCanvasElement, {
       type: "doughnut",
@@ -241,6 +251,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         ],
       },
       options: {
+        animation: false,
         plugins: {
           legend: { position: "bottom" },
           title: { display: true, text: preferred.label },
@@ -284,6 +295,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         : `${activeCount} filtro(s) activo(s)`;
 
     const result = await api.analyticsDocuments(filters);
+    lastMatchedTotal = result.total;
     matched.textContent = String(result.total);
 
     const avgConfidence =
@@ -337,6 +349,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
           ],
         },
         options: {
+          animation: false,
           responsive: true,
           plugins: { legend: { position: "bottom" } },
           scales: {
@@ -357,6 +370,54 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             : "Error cargando dashboard";
     }
   })();
+
+  function activeFilterDetails(): Array<{ label: string; value: string }> {
+    const filters = readFilters();
+    return Object.entries(filters).map(([key, value]) => ({
+      label: fieldOptions.find((field) => field.key === key)?.label ?? key,
+      value,
+    }));
+  }
+
+  exportPdfBtn.addEventListener("click", () => {
+    void (async () => {
+      errorEl.hidden = true;
+      exportPdfBtn.disabled = true;
+      const previousLabel = exportPdfBtn.textContent;
+      exportPdfBtn.textContent = "Generando PDF…";
+      try {
+        await exportDashboardPdf({
+          generatedAt: new Date(),
+          totals: {
+            uploaded: Number(uploaded.textContent || 0),
+            completed: Number(completed.textContent || 0),
+            failed: Number(failed.textContent || 0),
+            processing: Number(processing.textContent || 0),
+            analyzed: Number(analyzed.textContent || 0),
+            matched: lastMatchedTotal,
+            avgConfidence: confidence.textContent || "—",
+            words: Number(words.textContent || 0),
+          },
+          filters: activeFilterDetails(),
+          charts: [
+            { title: "Documentos por día", chart: volumeChart },
+            { title: `Distribución · ${filterChartTitle}`, chart: filterChart },
+            ...breakdownCharts.map((entry) => ({
+              title: entry.title,
+              chart: entry.chart,
+            })),
+          ],
+        });
+      } catch (error) {
+        errorEl.hidden = false;
+        errorEl.textContent =
+          error instanceof Error ? error.message : "Error exportando PDF";
+      } finally {
+        exportPdfBtn.disabled = false;
+        exportPdfBtn.textContent = previousLabel || "Exportar PDF";
+      }
+    })();
+  });
 
   applyBtn.addEventListener("click", () => {
     void loadFiltered().catch((error) => {

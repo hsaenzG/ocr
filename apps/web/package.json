@@ -16,7 +16,8 @@
   "dependencies": {
     "@ocr/shared": "*",
     "astro": "^7.2.9",
-    "chart.js": "^4.5.1"
+    "chart.js": "^4.5.1",
+    "jspdf": "^4.2.1"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",
