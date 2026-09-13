@@ -4,7 +4,9 @@ import { OcrStack } from "../lib/ocr-stack";
 
 const app = new cdk.App();
 
-new OcrStack(app, "OcrStack", {
+const stackName = process.env.STACK_NAME ?? "OcrStack";
+
+new OcrStack(app, stackName, {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION,

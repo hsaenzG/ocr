@@ -4,15 +4,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+STACK_NAME="${STACK_NAME:-OcrStack}"
 API_URL="${PUBLIC_API_BASE_URL:-}"
 APP_ID="${AMPLIFY_APP_ID:-}"
 BRANCH="${AMPLIFY_BRANCH:-main}"
 
 if [[ -z "$API_URL" || -z "$APP_ID" ]]; then
-  echo "Resolving Amplify/API outputs from CloudFormation stack OcrStack..."
-  API_URL="${API_URL:-$(aws cloudformation describe-stacks --stack-name OcrStack --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)}"
-  APP_ID="${APP_ID:-$(aws cloudformation describe-stacks --stack-name OcrStack --query "Stacks[0].Outputs[?OutputKey=='AmplifyAppId'].OutputValue" --output text)}"
-  BRANCH="${BRANCH:-$(aws cloudformation describe-stacks --stack-name OcrStack --query "Stacks[0].Outputs[?OutputKey=='AmplifyBranch'].OutputValue" --output text)}"
+  echo "Resolving Amplify/API outputs from CloudFormation stack ${STACK_NAME}..."
+  API_URL="${API_URL:-$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)}"
+  APP_ID="${APP_ID:-$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='AmplifyAppId'].OutputValue" --output text)}"
+  BRANCH="${BRANCH:-$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='AmplifyBranch'].OutputValue" --output text)}"
 fi
 
 if [[ -z "$API_URL" || "$API_URL" == "None" ]]; then
@@ -56,7 +57,7 @@ while true; do
   echo "  status=$STATUS"
   case "$STATUS" in
     SUCCEED)
-      URL=$(aws cloudformation describe-stacks --stack-name OcrStack --query "Stacks[0].Outputs[?OutputKey=='AmplifyUrl'].OutputValue" --output text)
+      URL=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='AmplifyUrl'].OutputValue" --output text)
       echo "Deployed: $URL"
       exit 0
       ;;

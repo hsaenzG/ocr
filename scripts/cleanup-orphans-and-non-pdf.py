@@ -1,15 +1,44 @@
 #!/usr/bin/env python3
-"""Delete orphan UPLOADED PDFs (no S3 object) and all non-PDF test documents."""
+"""Delete orphan UPLOADED PDFs (no S3 object) and all non-PDF test documents.
+
+Requires env (from your stack outputs / Lambda env):
+  API_BASE_URL or PUBLIC_API_BASE_URL
+  DOCS_BUCKET_NAME
+  TABLE_NAME
+"""
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 import urllib.request
 
-API = "https://fyxx7fo395.execute-api.us-east-1.amazonaws.com"
-BUCKET = "ocrstack-docsbucketecea003f-s3ztmhmm7j2j"
-TABLE = "OcrStack-OcrTable108CDB79-FIK5GWEZFEMQ"
+API = (os.environ.get("API_BASE_URL") or os.environ.get("PUBLIC_API_BASE_URL") or "").rstrip(
+    "/"
+)
+BUCKET = os.environ.get("DOCS_BUCKET_NAME") or ""
+TABLE = os.environ.get("TABLE_NAME") or ""
+
+
+def require_env() -> None:
+    missing = [
+        name
+        for name, value in (
+            ("API_BASE_URL or PUBLIC_API_BASE_URL", API),
+            ("DOCS_BUCKET_NAME", BUCKET),
+            ("TABLE_NAME", TABLE),
+        )
+        if not value
+    ]
+    if missing:
+        print(
+            "Missing env: " + ", ".join(missing) + "\n"
+            "Export them from your stack (ApiUrl, DocsBucketName, TableName).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def api_get(path: str):
@@ -113,7 +142,6 @@ def scan_entity(entity_type: str) -> list[dict]:
 def delete_document(meta: dict) -> dict:
     document_id = meta["documentId"]
     created_at = meta["createdAt"]
-    status = meta["status"]
     s3_key = meta["s3Key"]
     deleted = {"docItems": 0, "s3": False}
 
@@ -141,6 +169,7 @@ def delete_document(meta: dict) -> dict:
 
 
 def main() -> None:
+    require_env()
     docs = api_get("/documents?limit=100")["items"]
     targets: list[tuple[str, dict]] = []
 
