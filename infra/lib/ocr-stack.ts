@@ -110,7 +110,7 @@ export class OcrStack extends cdk.Stack {
     );
 
     const authUsername =
-      (this.node.tryGetContext("authUsername") as string | undefined) ?? "natalia";
+      (this.node.tryGetContext("authUsername") as string | undefined) ?? "admin";
     const authPasswordFromContext = this.node.tryGetContext("authPassword") as
       | string
       | undefined;

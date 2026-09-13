@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 720" role="img" aria-labelledby="title desc">
+  <title id="title">OCR - Arquitectura serverless</title>
+  <desc id="desc">Flujo: Browser y Amplify hacia API Gateway y Lambda API; uploads presignados a S3; S3 dispara SQS hacia Lambda Processor y Textract; PDFs cierran via SNS y otra cola; resultados en DynamoDB; analytics con Bedrock; auth con Secrets Manager.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="112%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style><![CDATA[
+      .label { font-family: "DM Sans", "Segoe UI", Helvetica, Arial, sans-serif; fill: #0f172a; }
+      .muted { fill: #64748b; font-size: 11px; }
+      .title { font-size: 22px; font-weight: 700; }
+      .subtitle { font-size: 12px; fill: #475569; }
+      .box-title { font-size: 13px; font-weight: 700; }
+      .box-sub { font-size: 11px; fill: #334155; }
+      .lane-title { font-size: 12px; font-weight: 700; fill: #1e293b; }
+      .edge { stroke: #334155; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+      .edge-dashed { stroke: #64748b; stroke-width: 1.4; stroke-dasharray: 5 4; fill: none; marker-end: url(#arrow); }
+    ]]></style>
+  </defs>
+
+  <rect width="1180" height="720" rx="16" fill="#f8fafc"/>
+  <text x="40" y="42" class="label title">OCR - Arquitectura serverless</text>
+  <text x="40" y="64" class="label subtitle">Presign - S3 - SQS - Lambda - Textract - DynamoDB - UI Astro en Amplify - Analytics con Bedrock</text>
+
+  <rect x="28" y="88" width="200" height="560" rx="14" fill="#ecfeff" stroke="#a5f3fc"/>
+  <rect x="244" y="88" width="220" height="560" rx="14" fill="#eff6ff" stroke="#bfdbfe"/>
+  <rect x="480" y="88" width="360" height="560" rx="14" fill="#f0fdf4" stroke="#bbf7d0"/>
+  <rect x="856" y="88" width="296" height="560" rx="14" fill="#fff7ed" stroke="#fed7aa"/>
+
+  <text x="48" y="112" class="label lane-title">Cliente</text>
+  <text x="264" y="112" class="label lane-title">API</text>
+  <text x="500" y="112" class="label lane-title">Ingesta &amp; OCR</text>
+  <text x="876" y="112" class="label lane-title">Datos &amp; Auth</text>
+
+  <g filter="url(#shadow)">
+    <rect x="48" y="140" width="160" height="70" rx="10" fill="#ffffff" stroke="#0891b2" stroke-width="1.5"/>
+  </g>
+  <text x="128" y="168" text-anchor="middle" class="label box-title">Browser</text>
+  <text x="128" y="188" text-anchor="middle" class="label box-sub">Upload - Docs - Dashboard</text>
+
+  <g filter="url(#shadow)">
+    <rect x="48" y="240" width="160" height="70" rx="10" fill="#ffffff" stroke="#0891b2" stroke-width="1.5"/>
+  </g>
+  <text x="128" y="268" text-anchor="middle" class="label box-title">Amplify Hosting</text>
+  <text x="128" y="288" text-anchor="middle" class="label box-sub">Astro static + islands</text>
+
+  <g filter="url(#shadow)">
+    <rect x="268" y="140" width="172" height="70" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+  </g>
+  <text x="354" y="168" text-anchor="middle" class="label box-title">API Gateway</text>
+  <text x="354" y="188" text-anchor="middle" class="label box-sub">HTTP API + JWT</text>
+
+  <g filter="url(#shadow)">
+    <rect x="268" y="240" width="172" height="86" rx="10" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+  </g>
+  <text x="354" y="268" text-anchor="middle" class="label box-title">Lambda API</text>
+  <text x="354" y="288" text-anchor="middle" class="label box-sub">presign - docs - stats</text>
+  <text x="354" y="306" text-anchor="middle" class="label box-sub">analytics - auth - edit</text>
+
+  <g filter="url(#shadow)">
+    <rect x="508" y="140" width="150" height="70" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  </g>
+  <text x="583" y="168" text-anchor="middle" class="label box-title">S3 Docs</text>
+  <text x="583" y="188" text-anchor="middle" class="label box-sub">Presigned PUT</text>
+
+  <g filter="url(#shadow)">
+    <rect x="688" y="140" width="132" height="70" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  </g>
+  <text x="754" y="168" text-anchor="middle" class="label box-title">SQS</text>
+  <text x="754" y="188" text-anchor="middle" class="label box-sub">+ DLQ</text>
+
+  <g filter="url(#shadow)">
+    <rect x="508" y="250" width="150" height="70" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  </g>
+  <text x="583" y="278" text-anchor="middle" class="label box-title">Lambda</text>
+  <text x="583" y="298" text-anchor="middle" class="label box-sub">Processor</text>
+
+  <g filter="url(#shadow)">
+    <rect x="688" y="250" width="132" height="70" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  </g>
+  <text x="754" y="278" text-anchor="middle" class="label box-title">Textract</text>
+  <text x="754" y="298" text-anchor="middle" class="label box-sub">sync / async</text>
+
+  <g filter="url(#shadow)">
+    <rect x="508" y="360" width="150" height="70" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  </g>
+  <text x="583" y="388" text-anchor="middle" class="label box-title">SNS</text>
+  <text x="583" y="408" text-anchor="middle" class="label box-sub">job complete</text>
+
+  <g filter="url(#shadow)">
+    <rect x="688" y="360" width="132" height="70" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  </g>
+  <text x="754" y="388" text-anchor="middle" class="label box-title">SQS results</text>
+  <text x="754" y="408" text-anchor="middle" class="label box-sub">+ DLQ</text>
+
+  <g filter="url(#shadow)">
+    <rect x="588" y="470" width="160" height="70" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  </g>
+  <text x="668" y="498" text-anchor="middle" class="label box-title">Lambda</text>
+  <text x="668" y="518" text-anchor="middle" class="label box-sub">TextractResult</text>
+
+  <g filter="url(#shadow)">
+    <rect x="884" y="140" width="244" height="86" rx="10" fill="#ffffff" stroke="#ea580c" stroke-width="1.5"/>
+  </g>
+  <text x="1006" y="170" text-anchor="middle" class="label box-title">DynamoDB</text>
+  <text x="1006" y="190" text-anchor="middle" class="label box-sub">Single table - Streams</text>
+  <text x="1006" y="208" text-anchor="middle" class="label box-sub">META - EXTRACT - ANALYTICS</text>
+
+  <g filter="url(#shadow)">
+    <rect x="884" y="260" width="244" height="70" rx="10" fill="#ffffff" stroke="#ea580c" stroke-width="1.5"/>
+  </g>
+  <text x="1006" y="288" text-anchor="middle" class="label box-title">Lambda Analytics</text>
+  <text x="1006" y="308" text-anchor="middle" class="label box-sub">Stream to tabular fields</text>
+
+  <g filter="url(#shadow)">
+    <rect x="884" y="360" width="244" height="70" rx="10" fill="#ffffff" stroke="#ea580c" stroke-width="1.5"/>
+  </g>
+  <text x="1006" y="388" text-anchor="middle" class="label box-title">Amazon Bedrock</text>
+  <text x="1006" y="408" text-anchor="middle" class="label box-sub">Nova Lite (+ heuristic)</text>
+
+  <g filter="url(#shadow)">
+    <rect x="884" y="460" width="244" height="70" rx="10" fill="#ffffff" stroke="#ea580c" stroke-width="1.5"/>
+  </g>
+  <text x="1006" y="488" text-anchor="middle" class="label box-title">Secrets Manager</text>
+  <text x="1006" y="508" text-anchor="middle" class="label box-sub">Single-user credentials</text>
+
+  <path class="edge" d="M128 210 V236"/>
+  <path class="edge" d="M208 175 H264"/>
+  <path class="edge" d="M208 275 H264"/>
+  <path class="edge" d="M440 175 H504"/>
+  <path class="edge-dashed" d="M440 280 H504"/>
+  <path class="edge-dashed" d="M354 326 V560 H884"/>
+  <path class="edge" d="M440 295 C470 295 500 183 508 175"/>
+  <path class="edge" d="M658 175 H684"/>
+  <path class="edge" d="M754 210 V246"/>
+  <path class="edge" d="M688 285 H662"/>
+  <path class="edge" d="M820 285 H860 V183"/>
+  <path class="edge" d="M754 320 V356"/>
+  <path class="edge" d="M658 395 H684"/>
+  <path class="edge" d="M754 430 V470 H748"/>
+  <path class="edge" d="M748 505 H860 V226"/>
+  <path class="edge-dashed" d="M583 320 V420 H860 V226"/>
+  <path class="edge" d="M1006 226 V256"/>
+  <path class="edge" d="M1006 330 V356"/>
+  <path class="edge-dashed" d="M884 295 H820"/>
+  <path class="edge-dashed" d="M884 495 H400 V326"/>
+
+  <rect x="48" y="580" width="1084" height="52" rx="10" fill="#ffffff" stroke="#e2e8f0"/>
+  <line x1="70" y1="606" x2="110" y2="606" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <text x="120" y="610" class="label muted">flujo principal</text>
+  <line x1="250" y1="606" x2="290" y2="606" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="300" y="610" class="label muted">consulta / auth / sync extract</text>
+  <text x="560" y="610" class="label muted">JPEG/PNG: DetectDocumentText (sync) - PDF: StartDocumentTextDetection - SNS - SQS</text>
+</svg>
