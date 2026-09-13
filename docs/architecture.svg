@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 720" role="img" aria-labelledby="title desc">
   <title id="title">OCR - Arquitectura serverless</title>
-  <desc id="desc">Flujo: Browser y Amplify hacia API Gateway y Lambda API; uploads presignados a S3; S3 dispara SQS hacia Lambda Processor y Textract; PDFs cierran via SNS y otra cola; resultados en DynamoDB; analytics con Bedrock; auth con Secrets Manager.</desc>
+  <desc id="desc">Flujo: Browser carga UI desde Amplify y llama API Gateway → Lambda API; PUT firmado a S3; S3 → SQS → Lambda Processor → Textract; PDFs: Textract → SNS → SQS → TextractResult → DynamoDB; stream EXTRACT → Analytics → Bedrock; auth con Secrets Manager.</desc>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -129,26 +129,34 @@
   <text x="1006" y="488" text-anchor="middle" class="label box-title">Secrets Manager</text>
   <text x="1006" y="508" text-anchor="middle" class="label box-sub">Single-user credentials</text>
 
+  <!-- Cliente: Browser sirve UI desde Amplify y llama a la API -->
   <path class="edge" d="M128 210 V236"/>
   <path class="edge" d="M208 175 H264"/>
-  <path class="edge" d="M208 275 H264"/>
-  <path class="edge" d="M440 175 H504"/>
-  <path class="edge-dashed" d="M440 280 H504"/>
-  <path class="edge-dashed" d="M354 326 V560 H884"/>
-  <path class="edge" d="M440 295 C470 295 500 183 508 175"/>
+
+  <!-- API: Gateway → Lambda; Lambda consulta Dynamo / Secrets y emite presign a S3 -->
+  <path class="edge" d="M354 210 V236"/>
+  <path class="edge-dashed" d="M440 255 V175 H504"/>
+  <path class="edge-dashed" d="M440 300 H500 V183 H880"/>
+  <path class="edge-dashed" d="M354 326 V495 H880"/>
+
+  <!-- Browser PUT firmado → S3 (por encima de la API) -->
+  <path class="edge" d="M128 140 V118 H583 V136"/>
+
+  <!-- Ingesta: S3 → SQS → Processor → Textract -->
   <path class="edge" d="M658 175 H684"/>
-  <path class="edge" d="M754 210 V246"/>
-  <path class="edge" d="M688 285 H662"/>
-  <path class="edge" d="M820 285 H860 V183"/>
-  <path class="edge" d="M754 320 V356"/>
+  <path class="edge" d="M754 210 V230 H583 V246"/>
+  <path class="edge" d="M658 285 H684"/>
+
+  <!-- Sync extract → DynamoDB; PDF async: Textract → SNS → SQS results → TextractResult → DynamoDB -->
+  <path class="edge-dashed" d="M583 320 V335 H840 V183 H880"/>
+  <path class="edge" d="M754 320 V345 H583 V356"/>
   <path class="edge" d="M658 395 H684"/>
-  <path class="edge" d="M754 430 V470 H748"/>
-  <path class="edge" d="M748 505 H860 V226"/>
-  <path class="edge-dashed" d="M583 320 V420 H860 V226"/>
+  <path class="edge" d="M754 430 V450 H668 V466"/>
+  <path class="edge" d="M748 505 H860 V183 H880"/>
+
+  <!-- Datos: stream analytics → Bedrock -->
   <path class="edge" d="M1006 226 V256"/>
   <path class="edge" d="M1006 330 V356"/>
-  <path class="edge-dashed" d="M884 295 H820"/>
-  <path class="edge-dashed" d="M884 495 H400 V326"/>
 
   <rect x="48" y="580" width="1084" height="52" rx="10" fill="#ffffff" stroke="#e2e8f0"/>
   <line x1="70" y1="606" x2="110" y2="606" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
